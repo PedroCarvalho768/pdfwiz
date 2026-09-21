@@ -1,0 +1,16 @@
+#0e2127 #f8fcfc light-ink-on-bg
+#596a6e #f8fcfc light-muted-on-bg
+#596a6e #f0f6f6 light-muted-on-surface
+#006878 #f8fcfc light-accent-on-bg
+#f6fdfe #006878 light-cta-label-on-accent
+#0e2127 #d5edf0 light-ink-on-accent-soft
+#b42e30 #ffebe9 light-danger-on-danger-soft
+#eef6f7 #081418 dark-ink-on-bg
+#9badb1 #081418 dark-muted-on-bg
+#9badb1 #101e22 dark-muted-on-surface
+#3ac0c7 #081418 dark-accent-on-bg
+#001318 #3ac0c7 dark-cta-label-on-accent
+#f5837c #411e1c dark-danger-on-danger-soft
+#f1f7f8 #0b1d22 panel-ink-on-panel
+#a3b5b8 #0b1d22 panel-muted-on-panel
+#4dd4db #0b1d22 panel-accent-on-panel

@@ -1,0 +1,185 @@
+@import 'tailwindcss';
+
+/* Automatic source detection is relative to this file and to the repo root.
+   This project is not a Git repo, so declare the tree explicitly rather than
+   relying on the heuristic. */
+@source '../../src/**/*.{svelte,ts}';
+@plugin '@tailwindcss/forms';
+@plugin '@tailwindcss/typography';
+
+/* Self-hosted, so no render-blocking request to a font CDN.
+   Archivo carries a width axis, which is what gives the display voice its
+   character; Fragment Mono is used only for measurements and file sizes,
+   never as decoration. */
+@import '@fontsource-variable/archivo/wdth.css';
+@import '@fontsource/fragment-mono/400.css';
+
+/**
+ * Tokens.
+ *
+ * Authored in OKLCH: its lightness is perceptually even, so a fixed-step
+ * ramp actually looks even. Roles are named, not shades, so a rebrand does
+ * not mean renaming every usage.
+ *
+ * The hue is petrol (H 205) and it is a deliberate rejection of the two
+ * reflexes in this category: PDF tools are red (Adobe, iLovePDF, Smallpdf)
+ * and web apps are indigo. Neutrals are tinted toward that same hue by a
+ * small chroma so the greys belong to this brand rather than to Tailwind.
+ */
+@theme {
+	--font-sans: 'Archivo Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'Fragment Mono', ui-monospace, monospace;
+
+	--color-bg: oklch(0.988 0.004 205);
+	--color-surface: oklch(0.968 0.006 205);
+	--color-raised: oklch(0.935 0.009 205);
+	--color-line: oklch(0.893 0.011 205);
+	--color-muted: oklch(0.512 0.021 215);
+	--color-ink: oklch(0.235 0.028 220);
+	--color-accent: oklch(0.468 0.098 210);
+	--color-accent-soft: oklch(0.93 0.026 205);
+	--color-accent-ink: oklch(0.99 0.008 205);
+
+	/* Danger is the only second hue on the page. It carries meaning rather
+	   than decoration, and it is always paired with text, never colour
+	   alone. Everything else uses the neutral ramp. */
+	--color-danger: oklch(0.512 0.17 25);
+	--color-danger-soft: oklch(0.955 0.022 25);
+
+	/* The hero workbench. Deliberately NOT --ink/--bg: those swap between
+	   schemes, which turned the dark panel into a white slab in dark mode.
+	   A surface that holds white pages stays dark in both. */
+	--color-panel: oklch(0.216 0.026 220);
+	--color-panel-ink: oklch(0.972 0.006 205);
+	--color-panel-muted: oklch(0.76 0.02 210);
+	/* Used for the measured numbers on the dark panel. The page accent is
+	   tuned for a light background and would not clear 4.5:1 here. */
+	--color-panel-accent: oklch(0.8 0.115 200);
+
+	/* One radius system. Cards 12px, controls 8px, pills for tags only. */
+	--radius-card: 12px;
+	--radius-control: 8px;
+}
+
+/**
+ * Dark mode is the same ramp inverted, not a different design. The accent
+ * lightens because a 0.47-lightness petrol is unreadable on a dark surface.
+ *
+ * These are plain custom-property overrides, NOT a nested `@theme`. Tailwind
+ * v4 does not support `@theme` inside `@media`: it hoists the declarations to
+ * `:root`, which silently deletes light mode. The names are already
+ * registered by the `@theme` block above, so overriding them here is enough.
+ *
+ * `--color-panel*` is deliberately absent: the hero workbench holds white
+ * pages and stays dark in both schemes.
+ */
+@media (prefers-color-scheme: dark) {
+	:root {
+		--color-bg: oklch(0.183 0.019 220);
+		--color-surface: oklch(0.224 0.021 220);
+		--color-raised: oklch(0.272 0.023 220);
+		--color-line: oklch(0.337 0.023 220);
+		--color-muted: oklch(0.735 0.021 210);
+		--color-ink: oklch(0.967 0.008 205);
+		--color-accent: oklch(0.742 0.112 200);
+		--color-accent-soft: oklch(0.3 0.04 210);
+		--color-accent-ink: oklch(0.17 0.03 215);
+		--color-danger: oklch(0.735 0.14 25);
+		--color-danger-soft: oklch(0.285 0.055 25);
+	}
+}
+
+@layer base {
+	html {
+		background-color: var(--color-bg);
+		color-scheme: light dark;
+	}
+
+	body {
+		background-color: var(--color-bg);
+		color: var(--color-ink);
+		font-family: var(--font-sans);
+		/* Optical sizing and kerning on by default; the display face is
+		   variable and looks wrong without them. */
+		font-optical-sizing: auto;
+		text-rendering: optimizeLegibility;
+	}
+
+	h1,
+	h2,
+	h3 {
+		text-wrap: balance;
+	}
+
+	p {
+		text-wrap: pretty;
+	}
+
+	/* The browser surfaces nobody themes. These ship with defaults that
+	   belong to no design system, and theming them is the cheapest signal
+	   that a page was built rather than assembled. */
+	::selection {
+		background-color: var(--color-accent);
+		color: var(--color-accent-ink);
+	}
+
+	:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
+		border-radius: 2px;
+	}
+
+	::placeholder {
+		color: var(--color-muted);
+		opacity: 1;
+	}
+
+	* {
+		scrollbar-color: var(--color-line) transparent;
+		scrollbar-width: thin;
+	}
+
+	/* A <select> falls back to the platform palette unless both are set,
+	   which reads as a white popup on a dark page. */
+	select,
+	option {
+		background-color: var(--color-surface);
+		color: var(--color-ink);
+	}
+
+	button,
+	a,
+	label,
+	select,
+	summary,
+	input[type='checkbox'],
+	input[type='radio'] {
+		touch-action: manipulation;
+	}
+
+	/* Numbers that change (file sizes, page counts) must not jitter. */
+	.tabular {
+		font-variant-numeric: tabular-nums;
+		font-family: var(--font-mono);
+	}
+
+	/* The display voice: Archivo pushed wide on its width axis. This is the
+	   whole reason the family was chosen over a static grotesque. */
+	.display {
+		font-variation-settings: 'wdth' 112;
+		letter-spacing: -0.03em;
+		line-height: 0.98;
+		font-weight: 700;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

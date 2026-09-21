@@ -1,0 +1,7 @@
+node_modules
+/build
+/.svelte-kit
+/.vercel
+test-results
+playwright-report
+pairs.nohash.txt
