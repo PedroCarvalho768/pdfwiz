@@ -26,15 +26,15 @@
 				handle: doc.handle,
 				order: pages.map((page) => page.source),
 				rotations: pages.map((page) => page.rotation),
-				filename: `${baseName(doc.title || 'document')}-organized.pdf`
+				filename: `${baseName(doc.filename)}-organized.pdf`
 			})
 		]);
 </script>
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
 	<p class="text-sm text-muted">
-		Arraste para reordenar, girar ou excluir páginas. {pages.length} de {doc?.pageCount ?? 0} páginas
-		mantidas.
+		Arraste as páginas ou use as setas para reordenar. Também dá para girar e excluir. {pages.length}
+		de {doc?.pageCount ?? 0} páginas mantidas.
 	</p>
 	<div class="flex gap-2">
 		<button

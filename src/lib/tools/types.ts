@@ -67,8 +67,11 @@ export type Field =
 	  }
 	| { kind: 'checkbox'; key: string; label: string; default?: boolean; help?: string }
 	| { kind: 'color'; key: string; label: string; default?: string; help?: string }
-	/** A page selection like "1-3,7", validated live against the document. */
-	| { kind: 'pages'; key: string; label: string; help?: string }
+	/**
+	 * A page selection like "1-3,7", validated live against the document.
+	 * `required` blocks the run while empty; otherwise empty means every page.
+	 */
+	| { kind: 'pages'; key: string; label: string; help?: string; required?: boolean }
 	/** A second file — a stamp, a logo, a signature image. */
 	| { kind: 'file'; key: string; label: string; accept: string[]; help?: string };
 
@@ -84,18 +87,26 @@ export interface ToolResult {
 	preview?: string;
 }
 
+/**
+ * A document as the UI holds it: the engine's description plus the name of
+ * the file it came from. `DocInfo.title` is the PDF's own /Title, which is
+ * often a template leftover ("Microsoft Word - Doc1"), so output names come
+ * from `filename` instead.
+ */
+export type LoadedDoc = DocInfo & { filename: string };
+
 export interface ToolRunContext {
 	/**
 	 * Documents already parsed by the engine. Empty for `raw` tools, whose
 	 * input the engine cannot read until it has been converted.
 	 */
-	docs: DocInfo[];
+	docs: LoadedDoc[];
 	/** The files the user dropped, untouched. */
 	sources: File[];
 	values: FieldValues;
 	/** Files picked through `file` fields, keyed by field key. */
 	files: Record<string, File>;
-	/** The first document's name without its extension, for output naming. */
+	/** The first file's name without its extension, for output naming. */
 	stem: string;
 	/** Resolve a `pages` field to 0-based indices; undefined means all pages. */
 	pages: (key: string) => number[] | undefined;
@@ -103,9 +114,11 @@ export interface ToolRunContext {
 
 /** Props a custom tool component receives. */
 export interface ToolProps {
-	docs: DocInfo[];
+	docs: LoadedDoc[];
 	busy: boolean;
 	run: (task: () => Promise<ToolResult | OutputFile[]>) => void;
+	/** Drop one document from the input, closing its engine handle. */
+	remove: (handle: string) => void;
 }
 
 export interface Tool {
@@ -129,6 +142,8 @@ export interface Tool {
 	 * MuPDF would just fail.
 	 */
 	raw?: boolean;
+	/** Renders every page to pixels, so huge page counts cost real memory. */
+	rasterizes?: boolean;
 	fields?: Field[];
 	execute?: (ctx: ToolRunContext) => Promise<ToolResult | OutputFile[]>;
 	component?: () => Promise<{ default: Component<ToolProps> }>;
@@ -161,6 +176,18 @@ export const READABLE = [
 
 export const PDF_ONLY = ['.pdf'];
 export const IMAGES = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tif', '.tiff'];
+
+/** pt-BR names for the PDF document information keys. */
+export const METADATA_LABELS: Record<string, string> = {
+	Title: 'Título',
+	Author: 'Autor',
+	Subject: 'Assunto',
+	Keywords: 'Palavras-chave',
+	Creator: 'Aplicativo de origem',
+	Producer: 'Gerador do PDF',
+	CreationDate: 'Criado em',
+	ModDate: 'Modificado em'
+};
 
 /** Default values declared by a tool's fields. */
 export function defaultValues(fields: Field[] = []): FieldValues {

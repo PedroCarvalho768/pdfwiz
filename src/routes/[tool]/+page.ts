@@ -11,7 +11,7 @@ export const entries: EntryGenerator = () => tools.map((tool) => ({ tool: tool.i
 
 export const load: PageLoad = ({ params }) => {
 	const tool = byId(params.tool);
-	if (!tool) error(404, `No tool called "${params.tool}"`);
+	if (!tool) error(404, `Não existe ferramenta chamada "${params.tool}"`);
 	// Components are loaded lazily by the page; only metadata crosses here.
 	return { tool };
 };

@@ -7,8 +7,13 @@
 	import { parsePageRange } from '$lib/engine/pages';
 	import { baseName } from '$lib/download';
 	import type { OutputFile } from '$lib/engine/contract';
-	import { defaultValues, type FieldValues, type Tool, type ToolResult } from '$lib/tools/types';
-	import type { DocInfo } from '$lib/engine/contract';
+	import {
+		defaultValues,
+		type FieldValues,
+		type LoadedDoc,
+		type Tool,
+		type ToolResult
+	} from '$lib/tools/types';
 
 	let {
 		tool,
@@ -18,21 +23,17 @@
 		run
 	}: {
 		tool: Tool;
-		docs: DocInfo[];
+		docs: LoadedDoc[];
 		sources: File[];
 		busy: boolean;
 		run: (task: () => Promise<ToolResult | OutputFile[]>) => void;
 	} = $props();
 
-	// Populated by the effect below, which also runs on mount — so the form
-	// resets whenever a different tool is shown.
-	let values = $state<FieldValues>({});
+	// The page remounts this per tool ({#key tool.id}), so reading the
+	// initial fields once is correct.
+	// svelte-ignore state_referenced_locally
+	let values = $state<FieldValues>(defaultValues(tool.fields));
 	let picked = $state<Record<string, File>>({});
-
-	$effect(() => {
-		values = defaultValues(tool.fields);
-		picked = {};
-	});
 
 	const pageCount = $derived(docs[0]?.pageCount ?? 0);
 
@@ -60,7 +61,17 @@
 		(tool.fields ?? []).filter((f) => f.kind === 'file' && !picked[f.key]).map((f) => f.label)
 	);
 
-	const blocked = $derived(busy || Object.keys(pageErrors).length > 0 || missingFiles.length > 0);
+	// Empty means "every page" unless the tool needs a selection: "Páginas a
+	// manter" left empty would otherwise produce an empty PDF.
+	const missingPages = $derived(
+		(tool.fields ?? [])
+			.filter((f) => f.kind === 'pages' && f.required && !String(values[f.key] ?? '').trim())
+			.map((f) => f.label)
+	);
+
+	const blocked = $derived(
+		busy || Object.keys(pageErrors).length > 0 || missingFiles.length > 0 || missingPages.length > 0
+	);
 
 	function submit() {
 		run(async () => {
@@ -68,9 +79,9 @@
 			return tool.execute({
 				docs,
 				sources,
-				values,
+				values: $state.snapshot(values),
 				files: picked,
-				stem: baseName(docs[0]?.title || sources[0]?.name || 'document'),
+				stem: baseName(docs[0]?.filename || sources[0]?.name || 'documento'),
 				pages: (key) => {
 					const raw = String(values[key] ?? '').trim();
 					return raw ? parsePageRange(raw, pageCount) : undefined;
@@ -159,7 +170,8 @@
 						<input
 							type={field.kind === 'password' ? 'password' : 'text'}
 							class={inputClass}
-							placeholder={field.kind === 'pages' ? 'e.g. 1-3,7' : field.placeholder}
+							placeholder={field.kind === 'pages' ? 'ex.: 1-3,7' : field.placeholder}
+							required={field.kind === 'pages' && field.required}
 							value={String(values[field.key] ?? '')}
 							oninput={(e) => (values[field.key] = e.currentTarget.value)}
 						/>
@@ -195,6 +207,9 @@
 		</button>
 		{#if missingFiles.length}
 			<span class="text-sm text-muted">Escolha {missingFiles.join(' e ')} primeiro.</span>
+		{/if}
+		{#if missingPages.length}
+			<span class="text-sm text-muted">Preencha {missingPages.join(' e ')} primeiro.</span>
 		{/if}
 	</div>
 </form>
