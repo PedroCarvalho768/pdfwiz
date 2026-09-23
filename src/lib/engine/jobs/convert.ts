@@ -52,7 +52,7 @@ export const convertJobs = {
 				bytes: format === 'jpeg' ? pixmap.asJPEG(quality, false) : pixmap.asPNG()
 			});
 			pixmap.destroy();
-			ctx.report({ done: n + 1, total: pages.length, label: 'Rendering pages' });
+			ctx.report({ done: n + 1, total: pages.length, label: 'Convertendo páginas' });
 			await ctx.yield();
 		}
 		return out;
@@ -127,9 +127,9 @@ ${body}
 			out.push({
 				filename: `${stem}-${pad(index + 1, doc.countPages())}.svg`,
 				mime: 'image/svg+xml',
-				bytes: buffer.asUint8Array()
+				bytes: buffer.asUint8Array().slice()
 			});
-			ctx.report({ done: n + 1, total: pages.length, label: 'Tracing pages' });
+			ctx.report({ done: n + 1, total: pages.length, label: 'Convertendo páginas' });
 			await ctx.yield();
 		}
 		return out;

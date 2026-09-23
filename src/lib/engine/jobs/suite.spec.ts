@@ -141,10 +141,11 @@ describe('interleave / overlay / insertBlank', () => {
 		expect(textOf(out.bytes, 1)).toContain('Base2');
 	});
 
-	it('inserts blank pages at the requested positions', () => {
+	it('inserts blank pages before the given source pages', () => {
 		const { ctx } = testContext();
 		const doc = fixture(ctx, ['One', 'Two']);
-		const out = handlers.insertBlank(ctx, { handle: doc.handle, at: [0, 3] });
+		// Before page 1, and after the last page (index == pageCount).
+		const out = handlers.insertBlank(ctx, { handle: doc.handle, at: [0, 2] });
 
 		expect(pageCountOf(out.bytes)).toBe(4);
 		expect(textOf(out.bytes, 0).trim()).toBe('');

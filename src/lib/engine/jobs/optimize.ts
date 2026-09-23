@@ -5,16 +5,22 @@ import { EngineError, allPages, rebuild, toOutput, type JobContext } from '../sh
 
 export interface CompressResult {
 	file: OutputFile;
+	/** Size of the file as it was opened, in bytes. */
 	before: number;
 	after: number;
 	imagesRecompressed: number;
+	/** Images that could not be decoded or re-encoded and were left as they were. */
+	imagesSkipped: number;
 }
+
+/** Keys of an image dictionary that describe the old encoding and must not outlive it. */
+const STALE_IMAGE_KEYS = ['Decode', 'SMaskInData', 'DecodeParms'];
 
 /**
  * Downsample and re-encode the image XObjects in place.
  *
- * This is the part of compression that actually matters — scanned pages are
- * almost entirely image data — and it keeps the text layer as real text,
+ * This is the part of compression that actually matters (scanned pages are
+ * almost entirely image data) and it keeps the text layer as real text,
  * which rasterising the whole page would destroy.
  */
 function recompressImages(
@@ -22,8 +28,9 @@ function recompressImages(
 	ctx: JobContext,
 	maxDimension: number,
 	quality: number
-): number {
-	let count = 0;
+): { recompressed: number; skipped: number } {
+	let recompressed = 0;
+	let skipped = 0;
 	const total = doc.countObjects();
 
 	for (let num = 1; num < total; num++) {
@@ -37,75 +44,71 @@ function recompressImages(
 			const subtype = obj.get('Subtype');
 			if (subtype.isNull() || subtype.asName() !== 'Image') continue;
 		} catch {
+			// A free or malformed xref slot is not an image, so not a skip.
 			continue;
 		}
 
 		try {
 			const image = doc.loadImage(obj);
-			const width = image.getWidth();
-			const height = image.getHeight();
 			// An image mask is 1 bit per pixel; re-encoding it as JPEG would
 			// make it larger and break the masking.
 			if (image.getImageMask()) continue;
+			const width = image.getWidth();
+			const height = image.getHeight();
 
+			// JPEG holds gray or RGB. Keep gray gray; everything else (CMYK,
+			// Lab, indexed, alpha) is converted to RGB.
+			const decoded = image.toPixmap();
+			const gray = decoded.getColorSpace()?.isGray() ?? false;
+			const space = gray ? mupdf.ColorSpace.DeviceGray : mupdf.ColorSpace.DeviceRGB;
 			const scale = Math.min(1, maxDimension / Math.max(width, height));
-			const pixmap = image.toPixmap();
-			const source =
-				scale < 1
-					? // No direct resample API, so redraw the image through a
-						// scaled device into a smaller pixmap.
-						(() => {
-							const target = new mupdf.Pixmap(
-								mupdf.ColorSpace.DeviceRGB,
-								[
-									0,
-									0,
-									Math.max(1, Math.round(width * scale)),
-									Math.max(1, Math.round(height * scale))
-								],
-								false
-							);
-							target.clear(255);
-							const device = new mupdf.DrawDevice(
-								mupdf.Matrix.scale((width * scale) / width, (height * scale) / height),
-								target
-							);
-							device.fillImage(
-								image,
-								mupdf.Matrix.concat(
-									mupdf.Matrix.scale(width, height),
-									mupdf.Matrix.scale(scale, scale)
-								),
-								1
-							);
-							device.close();
-							return target;
-						})()
-					: pixmap;
+
+			let source: mupdf.Pixmap;
+			if (scale < 1) {
+				// No direct resample API, so draw the image into a smaller
+				// pixmap. The image fills the unit square, so this matrix alone
+				// is its size on the target; the device adds no further scale.
+				const targetWidth = Math.max(1, Math.round(width * scale));
+				const targetHeight = Math.max(1, Math.round(height * scale));
+				source = new mupdf.Pixmap(space, [0, 0, targetWidth, targetHeight], false);
+				source.clear(255);
+				const device = new mupdf.DrawDevice(mupdf.Matrix.identity, source);
+				device.fillImage(image, mupdf.Matrix.scale(targetWidth, targetHeight), 1);
+				device.close();
+			} else if (decoded.getAlpha() || !(gray || decoded.getColorSpace()?.isRGB())) {
+				source = decoded.convertToColorSpace(space, false);
+			} else {
+				source = decoded;
+			}
 
 			const encoded = source.asJPEG(quality, false);
+			if (source !== decoded) source.destroy();
+			decoded.destroy();
+
 			// Only keep the new version if it is actually smaller.
-			if (encoded.byteLength < obj.readRawStream().getLength()) {
-				const replacement = doc.addImage(new mupdf.Image(encoded));
-				obj.writeRawStream(replacement.readRawStream());
-				for (const key of [
-					'Filter',
-					'Width',
-					'Height',
-					'ColorSpace',
-					'BitsPerComponent',
-					'DecodeParms'
-				])
-					obj.put(key, replacement.get(key));
-				count++;
+			if (encoded.byteLength >= obj.readRawStream().getLength()) continue;
+
+			const replacement = doc.addImage(new mupdf.Image(encoded));
+			obj.writeRawStream(replacement.readRawStream());
+			for (const key of ['Filter', 'Width', 'Height', 'ColorSpace', 'BitsPerComponent']) {
+				const value = replacement.get(key);
+				if (value.isNull()) obj.delete(key);
+				else obj.put(key, value);
 			}
-			if (source !== pixmap) source.destroy();
-			pixmap.destroy();
+			// /Decode would invert the new samples, /DecodeParms belongs to
+			// the old filter, SMaskInData to JPX. A colour-key /Mask names
+			// sample values of the old encoding; a stencil /Mask or an
+			// /SMask is a separate image and stays valid.
+			for (const key of STALE_IMAGE_KEYS) obj.delete(key);
+			if (obj.get('Mask').isArray()) obj.delete('Mask');
+			recompressed++;
 		} catch {
-			// A single unreadable image must not abort the whole compression.
+			// One unreadable image must not abort the whole compression, but
+			// it must not vanish from the report either.
+			skipped++;
 		}
 	}
-	return count;
+	return { recompressed, skipped };
 }
 
 export const optimizeJobs = {
@@ -123,19 +126,25 @@ export const optimizeJobs = {
 		}
 	): CompressResult {
 		const doc = ctx.get(params.handle);
-		const before = doc.saveToBuffer('').getLength();
+		const before = ctx.byteLength(params.handle);
 		const level = params.level ?? 'balanced';
 
-		let imagesRecompressed = 0;
+		let images = { recompressed: 0, skipped: 0 };
 		if (level !== 'lossless') {
 			const settings =
 				level === 'aggressive' ? { max: 1000, quality: 45 } : { max: 1600, quality: 72 };
-			imagesRecompressed = recompressImages(doc, ctx, settings.max, settings.quality);
+			images = recompressImages(doc, ctx, settings.max, settings.quality);
 		}
 
 		doc.subsetFonts();
 		const file = toOutput(doc, params.filename ?? 'compressed.pdf', 'garbage=compact,compress');
-		return { file, before, after: file.bytes.byteLength, imagesRecompressed };
+		return {
+			file,
+			before,
+			after: file.bytes.byteLength,
+			imagesRecompressed: images.recompressed,
+			imagesSkipped: images.skipped
+		};
 	},
 
 	/**
@@ -182,6 +191,7 @@ export const optimizeJobs = {
 	): OutputFile {
 		const doc = ctx.get(params.handle);
 		const dpi = params.dpi ?? 150;
+		if (dpi < 36 || dpi > 600) throw new EngineError('A resolução deve ficar entre 36 e 600 dpi');
 		const scale = dpi / 72;
 
 		const out = rebuild(
@@ -209,10 +219,10 @@ export const optimizeJobs = {
 	/** Drop unused objects and subset fonts without touching image quality. */
 	clean(ctx: JobContext, params: { handle: DocHandle; filename?: string }): CompressResult {
 		const doc = ctx.get(params.handle);
-		const before = doc.saveToBuffer('').getLength();
+		const before = ctx.byteLength(params.handle);
 		doc.subsetFonts();
 		const file = toOutput(doc, params.filename ?? 'cleaned.pdf', 'garbage=deduplicate,compress');
-		return { file, before, after: file.bytes.byteLength, imagesRecompressed: 0 };
+		return { file, before, after: file.bytes.byteLength, imagesRecompressed: 0, imagesSkipped: 0 };
 	},
 
 	/** Rewrite page labels, e.g. roman numerals for front matter. */

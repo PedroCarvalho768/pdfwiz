@@ -4,8 +4,8 @@ import type { DocHandle, OutputFile } from '../contract';
 import { EngineError, allPages, pagesOf, toOutput, type JobContext } from '../shared';
 
 /**
- * PDF permission bits, as defined in the spec's Table 22. The flags are
- * negative permissions in effect: a cleared bit forbids the operation.
+ * PDF permission bits, ISO 32000-1 Table 22 (bit N of the spec is 1 << (N-1)).
+ * A cleared bit forbids the operation.
  */
 export const PERMISSION_BITS = {
 	print: 1 << 2,
@@ -20,14 +20,28 @@ export const PERMISSION_BITS = {
 
 export type PermissionName = keyof typeof PERMISSION_BITS;
 
-/** Reserved high bits must be set; readers reject the value otherwise. */
-const PERMISSION_BASE = -1 & ~0xfff;
+/**
+ * Table 22's reserved bits: 1-2 must be 0, 7-8 and 13-32 must be 1. As a
+ * signed 32-bit integer, which is how /P is written.
+ */
+const PERMISSION_BASE = ~0xfff | (1 << 6) | (1 << 7);
 
 export function permissionMask(allowed: Partial<Record<PermissionName, boolean>>): number {
-	let mask = PERMISSION_BASE | 0b11; // bits 1-2 are reserved and always set
+	let mask = PERMISSION_BASE;
 	for (const [name, bit] of Object.entries(PERMISSION_BITS))
 		if (allowed[name as PermissionName]) mask |= bit;
 	return mask;
+}
+
+/**
+ * A random owner password, for when the caller set restrictions but no owner
+ * password. Defaulting the owner to the user password would hand every
+ * reader who can open the file the owner's rights, so restrictions would
+ * not be enforced at all.
+ */
+function randomPassword(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(24));
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export type Encryption = 'rc4-128' | 'aes-128' | 'aes-256';
@@ -38,17 +52,59 @@ function encryptionOptions(params: {
 	ownerPassword?: string;
 	permissions?: Partial<Record<PermissionName, boolean>>;
 }): string {
-	const parts = [
+	const user = params.userPassword ?? '';
+	const owner = params.ownerPassword || randomPassword();
+	// MuPDF's option string is comma-separated with no escape syntax.
+	if (user.includes(',') || owner.includes(','))
+		throw new EngineError('A senha não pode conter vírgula');
+	return [
 		'compress',
 		'garbage=compact',
 		`encrypt=${params.encryption ?? 'aes-256'}`,
-		`permissions=${permissionMask(params.permissions ?? {})}`
-	];
-	// MuPDF treats an empty password as "no password required to open", which
-	// is exactly what permissions-only protection means.
-	parts.push(`user-password=${params.userPassword ?? ''}`);
-	parts.push(`owner-password=${params.ownerPassword || params.userPassword || ''}`);
-	return parts.join(',');
+		`permissions=${permissionMask(params.permissions ?? {})}`,
+		// An empty user password means "no password required to open", which
+		// is exactly what permissions-only protection means.
+		`user-password=${user}`,
+		`owner-password=${owner}`
+	].join(',');
+}
+
+/** True for an action dictionary, or an array of them, that runs JavaScript. */
+function isJavaScript(action: mupdf.PDFObject): boolean {
+	if (action.isArray()) {
+		let found = false;
+		action.forEach((item) => (found ||= isJavaScript(item)));
+		return found;
+	}
+	return action.isDictionary() && action.get('S').toString() === '/JavaScript';
+}
+
+/**
+ * Visit every dictionary in the file: each indirect object, and the direct
+ * dictionaries nested inside it. Indirect children are not followed, since
+ * they are visited as objects in their own right. A stream's dictionary is
+ * visited through the stream.
+ */
+function forEachDictionary(doc: mupdf.PDFDocument, visit: (dict: mupdf.PDFObject) => void) {
+	const walk = (obj: mupdf.PDFObject) => {
+		if (obj.isIndirect() && !obj.isStream()) obj = obj.resolve();
+		if (obj.isDictionary()) visit(obj);
+		if (obj.isDictionary() || obj.isArray())
+			obj.forEach((child) => {
+				if (!child.isIndirect()) walk(child);
+			});
+	};
+	for (let num = 1; num < doc.countObjects(); num++) {
+		let obj: mupdf.PDFObject;
+		try {
+			obj = doc.newIndirect(num);
+			if (obj.resolve().isNull()) continue;
+		} catch {
+			continue; // a free or malformed xref slot
+		}
+		walk(obj);
+	}
+	walk(doc.getTrailer());
 }
 
 export const securityJobs = {
@@ -171,14 +227,22 @@ export const securityJobs = {
 		const root = doc.getTrailer().get('Root');
 
 		// MuPDF returns a null PDFObject rather than undefined, so optional
-		// chaining does not protect these lookups — isNull() does.
+		// chaining does not protect these lookups; isNull() does.
 		const names = root.get('Names');
 		const hasNames = !names.isNull() && names.isDictionary();
 
 		if (javascript) {
 			if (hasNames) names.delete('JavaScript');
 			root.delete('OpenAction');
-			root.delete('AA');
+			const acroForm = root.get('AcroForm');
+			if (acroForm.isDictionary()) acroForm.delete('CO');
+			// Scripts also hang off pages (/AA), annotations and link actions
+			// (/A), widgets and fields (/AA), and action chains (/Next).
+			forEachDictionary(doc, (dict) => {
+				dict.delete('AA');
+				for (const key of ['A', 'Next', 'OpenAction'])
+					if (isJavaScript(dict.get(key))) dict.delete(key);
+			});
 		}
 
 		if (attachments) {
@@ -187,17 +251,15 @@ export const securityJobs = {
 		}
 
 		if (metadata) {
-			for (const key of [
-				'info:Title',
-				'info:Author',
-				'info:Subject',
-				'info:Keywords',
-				'info:Creator',
-				'info:Producer'
-			])
-				doc.setMetaData(key, '');
-			// The XMP stream duplicates all of the above and must go too.
-			root.delete('Metadata');
+			// The whole Info dictionary, custom keys (Company, SourceModified)
+			// included, not just the six standard ones.
+			doc.getTrailer().delete('Info');
+			// XMP can sit on the catalog, pages, images and forms; PieceInfo
+			// holds private application data. Both go wherever they are.
+			forEachDictionary(doc, (dict) => {
+				dict.delete('Metadata');
+				dict.delete('PieceInfo');
+			});
 		}
 
 		if (links) {

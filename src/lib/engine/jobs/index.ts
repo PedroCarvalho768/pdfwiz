@@ -43,16 +43,23 @@ const coreJobs = {
 			);
 		}
 
-		if (doc.needsPassword()) {
-			if (!params.password)
-				throw new EngineError('Este PDF está protegido por senha', PASSWORD_REQUIRED);
-			if (doc.authenticatePassword(params.password) === 0)
-				throw new EngineError('A senha não foi aceita', PASSWORD_REQUIRED);
+		let pdf: mupdf.PDFDocument;
+		try {
+			if (doc.needsPassword()) {
+				if (!params.password)
+					throw new EngineError('Este PDF está protegido por senha', PASSWORD_REQUIRED);
+				if (doc.authenticatePassword(params.password) === 0)
+					throw new EngineError('A senha não foi aceita', PASSWORD_REQUIRED);
+			}
+			// Non-PDF formats have no PDF object model, so round-trip them
+			// through the writer to get one. Real PDFs pass straight through.
+			pdf = doc.asPDF() ?? toPdfDocument(doc);
+		} catch (err) {
+			doc.destroy();
+			throw err;
 		}
-
-		// Non-PDF formats have no PDF object model, so round-trip them through
-		// the writer to get one. Real PDFs pass straight through untouched.
-		const pdf = doc.asPDF() ?? toPdfDocument(doc);
+		// The source of a conversion is not needed once the PDF exists.
+		if (pdf !== doc) doc.destroy();
 		const handle = ctx.store(pdf, params.bytes.byteLength);
 		return describe(pdf, handle, params.bytes.byteLength);
 	},
@@ -63,7 +70,7 @@ const coreJobs = {
 	},
 
 	inspect(ctx: JobContext, params: { handle: DocHandle }): DocInfo {
-		return describe(ctx.get(params.handle), params.handle, 0);
+		return describe(ctx.get(params.handle), params.handle, ctx.byteLength(params.handle));
 	},
 
 	/**
@@ -97,7 +104,7 @@ const coreJobs = {
 			};
 			pixmap.destroy();
 			ctx.emit(chunk);
-			ctx.report({ done: n + 1, total: pages.length, label: 'Rendering pages' });
+			ctx.report({ done: n + 1, total: pages.length, label: 'Renderizando páginas' });
 			// Sync WASM hogs the thread; yielding keeps cancel responsive.
 			await ctx.yield();
 		}
@@ -129,5 +136,5 @@ export { EngineError, type JobContext };
 export { PAGE_SIZES } from './organize';
 export { PERMISSION_BITS, permissionMask, type PermissionName } from './security';
 export type { TextLine } from './edit';
-export type { DocumentReport, OutlineEntry } from './extract';
+export type { DocumentReport, OutlineEntry, SearchHit } from './extract';
 export type { CompressResult } from './optimize';

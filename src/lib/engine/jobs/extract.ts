@@ -1,12 +1,28 @@
 /** Pulling information and embedded resources out of a document. */
 import * as mupdf from 'mupdf';
 import type { DocHandle, OutputFile } from '../contract';
-import { allPages, pagesOf, type JobContext } from '../shared';
+import { EngineError, allPages, pageRotation, pagesOf, type JobContext } from '../shared';
+
+/** Hard-coded `max_hits` of MuPDF 1.28's `runSearch`, counted in quads per page. */
+const SEARCH_QUAD_CAP = 500;
 
 export interface OutlineEntry {
 	title: string;
 	page: number | null;
 	depth: number;
+}
+
+type Rect = [number, number, number, number];
+
+export interface SearchHit {
+	page: number;
+	/** Union of the match's quads, for highlighting or scrolling to it. */
+	rect: Rect;
+	/**
+	 * One rectangle per line the match covers. Redact these, not `rect`: a
+	 * match that wraps has a union spanning both lines in full.
+	 */
+	quads: Rect[];
 }
 
 export interface DocumentReport {
@@ -107,7 +123,7 @@ export const extractJobs = {
 				// A malformed or unsupported image should not abort the export
 				// of every other image in the file.
 			}
-			ctx.report({ done: n + 1, total: objects.length, label: 'Extracting images' });
+			ctx.report({ done: n + 1, total: objects.length, label: 'Extraindo imagens' });
 			await ctx.yield();
 		}
 		return out;
@@ -128,7 +144,7 @@ export const extractJobs = {
 			out.push({
 				filename: name || 'attachment',
 				mime: 'application/octet-stream',
-				bytes: contents.asUint8Array()
+				bytes: contents.asUint8Array().slice()
 			});
 		}
 		return out;
@@ -153,39 +169,57 @@ export const extractJobs = {
 		return {
 			filename: params.filename ?? 'document.pdf',
 			mime: 'application/pdf',
-			bytes: doc.saveToBuffer('garbage=compact,compress').asUint8Array()
+			bytes: doc.saveToBuffer('garbage=compact,compress').asUint8Array().slice()
 		};
 	},
 
 	/**
-	 * Find text, returning a hit rectangle per match.
+	 * Find text, returning every match. There is no default cap: redaction
+	 * feeds on this, and silently dropping matches would leave text behind.
+	 * `limit` caps the count only when a caller asks for it.
 	 *
-	 * Rectangles are in MuPDF page space — y runs *down* from the top-left,
+	 * Rectangles are in MuPDF page space: y runs *down* from the top-left,
 	 * matching structured text and annotations. See `draw.ts` for why that
 	 * differs from PDF user space.
 	 */
 	search(
 		ctx: JobContext,
 		params: { handle: DocHandle; needle: string; pages?: number[]; limit?: number }
-	): { page: number; rect: [number, number, number, number] }[] {
+	): SearchHit[] {
 		const doc = ctx.get(params.handle);
 		if (!params.needle) return [];
-		const limit = params.limit ?? 500;
-		const hits: { page: number; rect: [number, number, number, number] }[] = [];
+		const limit = params.limit ?? Infinity;
+		const hits: SearchHit[] = [];
 
 		for (const index of pagesOf(doc, params.pages)) {
-			if (hits.length >= limit) break;
 			// The second argument is an option string, not a hit limit; passing
 			// a number makes MuPDF throw "Unused search arguments found".
-			for (const quads of doc.loadPage(index).toStructuredText('').search(params.needle, '')) {
-				// A hit is a list of quads (one per line it wraps across);
-				// their union is the rectangle worth highlighting.
-				// A Quad is a flat 8-tuple: ul, ur, ll, lr as x/y pairs.
-				const xs = quads.flatMap((q) => [q[0], q[2], q[4], q[6]]);
-				const ys = quads.flatMap((q) => [q[1], q[3], q[5], q[7]]);
+			const matches = doc.loadPage(index).toStructuredText('').search(params.needle, '');
+			// MuPDF's JS binding stops at a fixed number of quads per page
+			// (runSearch in mupdf.js) and says nothing. Reaching it means
+			// matches may be missing, which for redaction is a leak, so fail.
+			if (matches.reduce((n, m) => n + m.length, 0) >= SEARCH_QUAD_CAP)
+				throw new EngineError(
+					`A página ${index + 1} tem ocorrências demais de "${params.needle}" (${SEARCH_QUAD_CAP} ou mais). Use um termo mais específico.`
+				);
+			for (const match of matches) {
+				if (hits.length >= limit) return hits;
+				// A match is a list of quads, one per line it wraps across. A
+				// Quad is a flat 8-tuple: ul, ur, ll, lr as x/y pairs.
+				const quads = match.map((q): Rect => {
+					const xs = [q[0], q[2], q[4], q[6]];
+					const ys = [q[1], q[3], q[5], q[7]];
+					return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+				});
 				hits.push({
 					page: index,
-					rect: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
+					rect: [
+						Math.min(...quads.map((q) => q[0])),
+						Math.min(...quads.map((q) => q[1])),
+						Math.max(...quads.map((q) => q[2])),
+						Math.max(...quads.map((q) => q[3]))
+					],
+					quads
 				});
 			}
 		}
@@ -213,12 +247,11 @@ export const extractJobs = {
 			annotations += page.getAnnotations().length;
 			formFields += page.getWidgets().length;
 			const [x0, y0, x1, y1] = page.getBounds();
-			const rotate = page.getObject().get('Rotate');
 			return {
 				page: index,
 				width: Math.abs(x1 - x0),
 				height: Math.abs(y1 - y0),
-				rotation: rotate.isNull() ? 0 : rotate.asNumber()
+				rotation: pageRotation(page)
 			};
 		});
 

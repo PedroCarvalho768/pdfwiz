@@ -18,10 +18,13 @@
  * - **PDF user space**: y runs UP from the bottom-left. This exists only
  *   inside a content stream.
  *
- * Every function in this file takes page space and flips internally, so
- * `flipY` below is the ONLY place the two meet. Getting this wrong does not
- * error — it silently draws in the wrong half of the page, which is why the
- * tests assert on vertical position rather than only on text presence.
+ * Page space is also what the viewer shows: it already accounts for /Rotate
+ * and for a CropBox or MediaBox that does not start at 0,0. So the mapping
+ * is not a plain y-flip; it is the inverse of `page.getTransform()` (user
+ * space to page space). `toUser` below is the ONLY place the two meet, and
+ * every stamp is drawn through it, which also keeps text upright on a
+ * rotated page. Getting this wrong does not error: it silently draws in the
+ * wrong place, which is why the tests assert on position, not presence.
  */
 import * as mupdf from 'mupdf';
 import { EngineError } from './contract';
@@ -67,24 +70,60 @@ export function parseColor(value: string): [number, number, number] {
 }
 
 /**
- * Encode a string as a PDF literal in WinAnsi.
- *
- * Latin-1 and WinAnsi agree over the accented range that matters for western
- * European text, so a codepoint below 256 maps straight through; anything
- * above it has no glyph in a base-14 simple font and would otherwise render
- * as garbage, so it is replaced rather than silently mangled.
+ * WinAnsi bytes 0x80-0x9F, which is where it departs from Latin-1: Latin-1
+ * puts invisible C1 controls there, WinAnsi puts typographic punctuation.
+ */
+const WIN_ANSI_HIGH: Record<number, number> = {
+	0x20ac: 0x80,
+	0x201a: 0x82,
+	0x0192: 0x83,
+	0x201e: 0x84,
+	0x2026: 0x85,
+	0x2020: 0x86,
+	0x2021: 0x87,
+	0x02c6: 0x88,
+	0x2030: 0x89,
+	0x0160: 0x8a,
+	0x2039: 0x8b,
+	0x0152: 0x8c,
+	0x017d: 0x8e,
+	0x2018: 0x91,
+	0x2019: 0x92,
+	0x201c: 0x93,
+	0x201d: 0x94,
+	0x2022: 0x95,
+	0x2013: 0x96,
+	0x2014: 0x97,
+	0x02dc: 0x98,
+	0x2122: 0x99,
+	0x0161: 0x9a,
+	0x203a: 0x9b,
+	0x0153: 0x9c,
+	0x017e: 0x9e,
+	0x0178: 0x9f
+};
+
+/** The WinAnsi byte for a codepoint, or null if the encoding has no glyph for it. */
+function winAnsi(code: number): number | null {
+	if (code >= 0x20 && code < 0x7f) return code;
+	if (code >= 0xa0 && code <= 0xff) return code;
+	return WIN_ANSI_HIGH[code] ?? null;
+}
+
+/**
+ * Encode a string as a PDF literal in WinAnsi, the encoding `drawText`
+ * registers its base-14 fonts with. A character WinAnsi cannot represent,
+ * control characters included, becomes "?" rather than a byte that would
+ * draw some other glyph.
  */
 export function pdfString(text: string): string {
 	let out = '';
 	for (const char of text) {
-		const code = char.codePointAt(0)!;
-		if (char === '(' || char === ')' || char === '\\') out += '\\' + char;
-		else if (code === 10) out += '\\n';
-		else if (code === 13) out += '\\r';
-		else if (code === 9) out += '\\t';
-		else if (code >= 32 && code < 127) out += char;
-		else if (code < 256) out += '\\' + code.toString(8).padStart(3, '0');
-		else out += '?';
+		const byte = winAnsi(char.codePointAt(0)!);
+		if (byte === null) out += '?';
+		else if (char === '(' || char === ')' || char === '\\') out += '\\' + char;
+		else if (byte < 0x7f) out += char;
+		else out += '\\' + byte.toString(8).padStart(3, '0');
 	}
 	return `(${out})`;
 }
@@ -97,8 +136,14 @@ export function measureText(text: string, fontName: FontName, size: number): num
 	return width * size;
 }
 
-/** MuPDF page space to PDF user space, and back — the two are mirror images. */
-const flipY = (bounds: mupdf.Rect, y: number) => bounds[1] + bounds[3] - y;
+/** MuPDF page space to PDF user space for this page. */
+const toUser = (page: mupdf.PDFPage): mupdf.Matrix => mupdf.Matrix.invert(page.getTransform());
+
+/** `local`, then page space to user space, as a content-stream `cm` operator. */
+const cm = (page: mupdf.PDFPage, local: mupdf.Matrix) =>
+	`${mupdf.Matrix.concat(local, toUser(page))
+		.map((n) => +n.toFixed(5))
+		.join(' ')} cm`;
 
 /** Add `value` under /Resources/<category>/<name>, creating the dictionaries. */
 function putResource(
@@ -116,8 +161,19 @@ function putResource(
 	bucket.put(name, value);
 }
 
-/** Marks a page whose original content we have already wrapped in q/Q. */
-const ISOLATED_KEY = 'PWIsolated';
+/**
+ * The first stream of a Contents array we have already isolated. Recognised
+ * by content, not by a private key on the page: MuPDF operations such as
+ * `applyRedactions` rewrite /Contents into a single stream, and a key would
+ * survive that and claim an isolation that no longer exists.
+ */
+const ISOLATION_OPEN = 'q % pdfwiz: isolates the original content\n';
+
+function isIsolated(contents: mupdf.PDFObject): boolean {
+	if (!contents.isArray() || contents.length < 2) return false;
+	const first = contents.get(0);
+	return first.isStream() && first.readStream().asString() === ISOLATION_OPEN;
+}
 
 /**
  * Append a content stream to a page, preserving whatever is already drawn.
@@ -137,23 +193,27 @@ function appendContent(doc: mupdf.PDFDocument, page: mupdf.PDFPage, content: str
 	const pageObj = page.getObject();
 	const stream = doc.addStream(content, null);
 	const existing = pageObj.get('Contents');
+	// Files written by an earlier version carry this key; it means nothing now.
+	pageObj.delete('PWIsolated');
 
 	if (existing.isNull()) {
 		pageObj.put('Contents', stream);
 		return;
 	}
 
-	if (pageObj.get(ISOLATED_KEY).isNull()) {
-		const wrapped = doc.newArray();
-		wrapped.push(doc.addStream('q\n', null));
-		if (existing.isArray()) existing.forEach((part) => wrapped.push(part));
-		else wrapped.push(existing);
-		wrapped.push(doc.addStream('\nQ\n', null));
-		pageObj.put('Contents', wrapped);
-		pageObj.put(ISOLATED_KEY, doc.newBoolean(true));
+	// Always build a new array rather than pushing onto the existing one: a
+	// direct array can be shared by several page dictionaries in memory.
+	const next = doc.newArray();
+	if (isIsolated(existing)) {
+		existing.forEach((part) => next.push(part));
+	} else {
+		next.push(doc.addStream(ISOLATION_OPEN, null));
+		if (existing.isArray()) existing.forEach((part) => next.push(part));
+		else next.push(existing);
+		next.push(doc.addStream('\nQ\n', null));
 	}
-
-	pageObj.get('Contents').push(stream);
+	next.push(stream);
+	pageObj.put('Contents', next);
 }
 
 /** Register an ExtGState for constant alpha, returning its resource name. */
@@ -201,17 +261,17 @@ export function drawText(doc: mupdf.PDFDocument, page: mupdf.PDFPage, options: T
 
 	const [r, g, b] = parseColor(color);
 	const gs = alphaState(doc, page, opacity);
-	const userY = flipY(page.getBounds(), y);
 	const radians = (rotate * Math.PI) / 180;
-	const cos = Math.cos(radians).toFixed(6);
-	const sin = Math.sin(radians).toFixed(6);
+	const cos = Math.cos(radians);
+	const sin = Math.sin(radians);
 
-	// Rotate about the anchor: translate to it, rotate, draw at the origin.
+	// Glyph space runs y up and page space y down. Rotate counter-clockwise
+	// as the viewer sees it, about the anchor, then map into user space.
 	const parts = [
 		'q',
 		gs ? `/${gs} gs` : '',
 		`${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)} rg`,
-		`${cos} ${sin} ${-sin} ${cos} ${x.toFixed(3)} ${userY.toFixed(3)} cm`,
+		cm(page, [cos, -sin, -sin, -cos, x, y]),
 		'BT',
 		`/${resourceName} ${size} Tf`,
 		`${pdfString(text)} Tj`,
@@ -241,8 +301,6 @@ export function drawImage(
 	const name = `PWx${Math.random().toString(36).slice(2, 8)}`;
 	putResource(doc, page, 'XObject', name, doc.addImage(image));
 	const gs = alphaState(doc, page, opacity);
-	// An image is anchored by its top-left, but drawn from its bottom-left.
-	const userY = flipY(page.getBounds(), y + height);
 
 	appendContent(
 		doc,
@@ -250,8 +308,9 @@ export function drawImage(
 		[
 			'q',
 			gs ? `/${gs} gs` : '',
-			// An image XObject draws into the unit square, so the CTM is its box.
-			`${width.toFixed(3)} 0 0 ${height.toFixed(3)} ${x.toFixed(3)} ${userY.toFixed(3)} cm`,
+			// An image XObject fills the unit square with y up, so its bottom
+			// edge (v = 0) goes to the lower edge of the box in page space.
+			cm(page, [width, 0, 0, -height, x, y + height]),
 			`/${name} Do`,
 			'Q'
 		]
@@ -269,8 +328,6 @@ export function drawRect(
 	opacity = 1
 ) {
 	const [x0, y0, x1, y1] = rect;
-	const bounds = page.getBounds();
-	const [uy0, uy1] = [flipY(bounds, y0), flipY(bounds, y1)];
 	const [r, g, b] = parseColor(color);
 	const gs = alphaState(doc, page, opacity);
 	appendContent(
@@ -280,7 +337,9 @@ export function drawRect(
 			'q',
 			gs ? `/${gs} gs` : '',
 			`${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)} rg`,
-			`${Math.min(x0, x1)} ${Math.min(uy0, uy1)} ${Math.abs(x1 - x0)} ${Math.abs(uy1 - uy0)} re f`,
+			// The rectangle stays in page space; the CTM maps it.
+			cm(page, mupdf.Matrix.identity),
+			`${Math.min(x0, x1)} ${Math.min(y0, y1)} ${Math.abs(x1 - x0)} ${Math.abs(y1 - y0)} re f`,
 			'Q'
 		]
 			.filter(Boolean)

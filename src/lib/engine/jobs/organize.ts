@@ -4,6 +4,7 @@ import type { DocHandle, OutputFile } from '../contract';
 import {
 	EngineError,
 	allPages,
+	copyDocument,
 	pageRotation,
 	pagesOf,
 	rebuild,
@@ -28,11 +29,51 @@ const sizeOf = (name: string): [number, number] => {
 	return size;
 };
 
-/** Copy pages from `src` into a fresh document, in the order given. */
+/**
+ * Give page `at` its own page dictionary. `rearrangePages` repeats a page by
+ * repeating the reference, so without this, rotating or stamping one copy
+ * would change every copy. The shallow copy still shares content streams
+ * and resources, which is what keeps duplicates cheap.
+ */
+function detachPage(doc: mupdf.PDFDocument, at: number) {
+	const copy = doc.newDictionary();
+	doc.findPage(at).forEach((value, key) => {
+		if (key !== 'Parent') copy.put(key, value);
+	});
+	doc.deletePage(at);
+	doc.insertPage(at, doc.addObject(copy));
+}
+
+/**
+ * A copy of `src` holding the given pages in the given order. Built by
+ * rearranging a full copy rather than grafting pages into a new document, so
+ * bookmarks, form fields and the structure tree survive, and shared fonts
+ * are not duplicated per page.
+ */
 function collect(src: mupdf.PDFDocument, order: number[]): mupdf.PDFDocument {
-	const out = new mupdf.PDFDocument();
-	for (const index of order) out.graftPage(-1, src, index);
+	if (order.length === 0) throw new EngineError('Nenhuma página foi selecionada');
+	const out = copyDocument(src);
+	out.rearrangePages(order);
+	const seen = new Set<number>();
+	order.forEach((index, position) => {
+		if (seen.has(index)) detachPage(out, position);
+		seen.add(index);
+	});
 	return out;
+}
+
+/**
+ * Graft pages into `out`, one graft map per source document. The map is what
+ * lets grafted pages keep sharing the fonts and images they shared in the
+ * source; grafting page by page without one copies them for every page.
+ */
+function grafter(out: mupdf.PDFDocument) {
+	const maps = new Map<mupdf.PDFDocument, mupdf.PDFGraftMap>();
+	return (src: mupdf.PDFDocument, index: number) => {
+		let map = maps.get(src);
+		if (!map) maps.set(src, (map = out.newGraftMap()));
+		map.graftPage(-1, src, index);
+	};
 }
 
 export const organizeJobs = {
@@ -43,6 +84,7 @@ export const organizeJobs = {
 	): Promise<OutputFile> {
 		if (params.handles.length < 2) throw new EngineError('Juntar exige pelo menos dois arquivos');
 		const out = new mupdf.PDFDocument();
+		const graft = grafter(out);
 		const total = params.handles.reduce((n, h) => n + ctx.get(h).countPages(), 0);
 		let done = 0;
 
@@ -50,8 +92,8 @@ export const organizeJobs = {
 			const src = ctx.get(handle);
 			for (let i = 0; i < src.countPages(); i++) {
 				ctx.checkCancelled();
-				out.graftPage(-1, src, i);
-				ctx.report({ done: ++done, total, label: 'Merging pages' });
+				graft(src, i);
+				ctx.report({ done: ++done, total, label: 'Juntando páginas' });
 				await ctx.yield();
 			}
 		}
@@ -108,8 +150,7 @@ export const organizeJobs = {
 		ctx: JobContext,
 		params: { handle: DocHandle; degrees: number; pages?: number[]; filename?: string }
 	): OutputFile {
-		const src = ctx.get(params.handle);
-		const out = collect(src, allPages(src));
+		const out = copyDocument(ctx.get(params.handle));
 		for (const index of pagesOf(out, params.pages)) {
 			const page = out.loadPage(index);
 			setPageRotation(out, page, pageRotation(page) + params.degrees);
@@ -157,18 +198,19 @@ export const organizeJobs = {
 		if ([top, right, bottom, left].some((v) => v < 0 || v >= 50))
 			throw new EngineError('Cada margem deve ficar entre 0% e 49%');
 
-		const src = ctx.get(params.handle);
-		const out = collect(src, allPages(src));
+		const out = copyDocument(ctx.get(params.handle));
 		for (const index of pagesOf(out, params.pages)) {
 			const page = out.loadPage(index);
+			// setPageBox takes MuPDF page space, as the viewer sees the page
+			// (y down, /Rotate applied), so y0 is the TOP edge.
 			const [x0, y0, x1, y1] = page.getBounds();
 			const width = x1 - x0;
 			const height = y1 - y0;
 			page.setPageBox('CropBox', [
 				x0 + (width * left) / 100,
-				y0 + (height * bottom) / 100,
+				y0 + (height * top) / 100,
 				x1 - (width * right) / 100,
-				y1 - (height * top) / 100
+				y1 - (height * bottom) / 100
 			]);
 		}
 		return toOutput(out, params.filename ?? 'cropped.pdf');
@@ -246,8 +288,8 @@ export const organizeJobs = {
 					const scale = Math.min(cellWidth / (x1 - x0), cellHeight / (y1 - y0));
 
 					const column = slot % columns;
-					// PDF counts y upwards, so the first row sits at the top.
-					const row = rows - 1 - Math.floor(slot / columns);
+					// The writer's device is page space, y down: row 0 is the top.
+					const row = Math.floor(slot / columns);
 					const cellX = gap + column * (cellWidth + gap);
 					const cellY = gap + row * (cellHeight + gap);
 
@@ -335,10 +377,11 @@ export const organizeJobs = {
 		if (params.reverseSecond) secondOrder.reverse();
 
 		const out = new mupdf.PDFDocument();
+		const graft = grafter(out);
 		const longest = Math.max(first.countPages(), secondOrder.length);
 		for (let i = 0; i < longest; i++) {
-			if (i < first.countPages()) out.graftPage(-1, first, i);
-			if (i < secondOrder.length) out.graftPage(-1, second, secondOrder[i]);
+			if (i < first.countPages()) graft(first, i);
+			if (i < secondOrder.length) graft(second, secondOrder[i]);
 		}
 		return toOutput(out, params.filename ?? 'interleaved.pdf');
 	},
@@ -376,20 +419,29 @@ export const organizeJobs = {
 		return toOutput(out, params.filename ?? 'overlaid.pdf');
 	},
 
-	/** Insert blank pages at chosen positions. */
+	/** Insert blank pages before chosen source pages. */
 	insertBlank(
 		ctx: JobContext,
 		params: {
 			handle: DocHandle;
-			/** 0-based positions in the output, after insertion. */
+			/**
+			 * 0-based SOURCE page indices: a blank goes before each. `pageCount`
+			 * means after the last page. Repeating an index inserts that many.
+			 */
 			at: number[];
 			size?: string;
 			filename?: string;
 		}
 	): OutputFile {
 		const src = ctx.get(params.handle);
-		const out = new mupdf.PDFDocument();
-		const insertAt = new Set(params.at);
+		const count = src.countPages();
+		const bad = params.at.find((i) => !Number.isInteger(i) || i < 0 || i > count);
+		if (bad !== undefined)
+			throw new EngineError(
+				`A posição ${bad + 1} está fora do intervalo (o documento tem ${count} páginas)`
+			);
+		if (params.at.length === 0) throw new EngineError('Escolha onde inserir a página em branco');
+
 		const [width, height] = params.size
 			? sizeOf(params.size)
 			: (() => {
@@ -397,19 +449,12 @@ export const organizeJobs = {
 					return [x1 - x0, y1 - y0] as [number, number];
 				})();
 
-		let position = 0;
-		const addBlank = () => {
-			out.insertPage(-1, out.addPage([0, 0, width, height], 0, out.newDictionary(), ''));
-			position++;
-		};
-
-		for (let i = 0; i < src.countPages(); i++) {
-			while (insertAt.has(position)) addBlank();
-			out.graftPage(-1, src, i);
-			position++;
+		const out = copyDocument(src);
+		// Last position first, so earlier source indices stay valid.
+		for (const at of [...params.at].sort((a, b) => b - a)) {
+			const blank = out.addPage([0, 0, width, height], 0, out.newDictionary(), '');
+			out.insertPage(at === count ? -1 : at, blank);
 		}
-		while (insertAt.has(position)) addBlank();
-
 		return toOutput(out, params.filename ?? 'with-blanks.pdf');
 	}
 };
