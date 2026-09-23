@@ -118,8 +118,11 @@ Each of these cost real debugging time and is commented at the source:
 - **A meta CSP does not reach workers.** The policy in `vite.config.ts` is
   emitted as `<meta http-equiv>` on every prerendered page and governs the
   document. Workers loaded from a URL (MuPDF, Tesseract) take their policy
-  from their own response headers, so send the same policy as an HTTP header
-  from the host to cover them.
+  from their own response headers, which `vercel.json` sends. That header
+  must never gain `default-src` or `script-src`: browsers enforce both
+  policies, the header cannot carry each page's script hashes, and the
+  bootstrap script would be blocked. `vite preview` sends the same headers
+  (a plugin in `vite.config.ts` reads `vercel.json`), so e2e tests what ships.
 - **tesseract.js loads code from a CDN by default.** Its worker and WASM core
   are bundled from `node_modules` instead (`?url` imports in `OcrTool.svelte`);
   only the language model comes from `cdn.jsdelivr.net`, and the page says so.

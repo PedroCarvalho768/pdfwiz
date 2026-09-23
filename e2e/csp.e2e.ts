@@ -92,3 +92,12 @@ test('running OCR fetches only the language model from outside', async ({ page }
 		'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz'
 	]);
 });
+
+test('the host header covers workers and framing', async ({ page }) => {
+	const response = await page.goto('/');
+	const policy = response!.headers()['content-security-policy'] ?? '';
+	expect(policy).toContain("frame-ancestors 'none'");
+	expect(policy).toContain('connect-src');
+	// No script-src: it cannot carry per-page hashes and would block the bootstrap.
+	expect(policy).not.toContain('script-src');
+});
