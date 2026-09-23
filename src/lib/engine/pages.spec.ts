@@ -25,6 +25,21 @@ describe('parsePageRange', () => {
 		expect(() => parsePageRange('5-2', 10)).toThrow(/o início vem depois do fim/);
 		expect(() => parsePageRange('abc', 10)).toThrow(/Não entendi/);
 	});
+
+	it('rejects a huge range without expanding it first', () => {
+		expect(() => parsePageRange('1-1000000000', 10)).toThrow(/página 1000000000 está fora/);
+	});
+
+	it('names the missing page when an open range starts past the end', () => {
+		expect(() => parsePageRange('12-', 10)).toThrow(/A página 12 está fora do intervalo/);
+	});
+
+	it('accepts the position after the last page only when asked', () => {
+		expect(() => parsePageRange('1,4', 3)).toThrow(/fora do intervalo/);
+		expect(parsePageRange('1,4', 3, { allowEnd: true })).toEqual([0, 3]);
+		expect(parsePageRange('2-', 3, { allowEnd: true })).toEqual([1, 2]);
+		expect(() => parsePageRange('5', 3, { allowEnd: true })).toThrow(/fora do intervalo/);
+	});
 });
 
 describe('parseRangeGroups', () => {
