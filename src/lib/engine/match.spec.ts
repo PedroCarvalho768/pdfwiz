@@ -67,6 +67,17 @@ describe('findMatches', () => {
 		expect(m.after).toBe(' assina aqui');
 	});
 
+	it('cuts long context at word boundaries', () => {
+		const [m] = findMatches(
+			0,
+			page('alfa bravo charlie delta echo foxtrot golf Pedro hotel india juliett kilo lima mike'),
+			'pedro'
+		);
+		// The window starts exactly on "charlie", so no word is dropped there.
+		expect(m.before).toBe('charlie delta echo foxtrot golf ');
+		expect(m.after).toBe(' hotel india juliett kilo lima');
+	});
+
 	it('finds nothing for an empty query', () => {
 		expect(findMatches(0, page('abc'), '   ')).toEqual([]);
 	});

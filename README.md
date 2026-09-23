@@ -19,6 +19,7 @@ One engine, one seam.
 src/lib/engine/
   contract.ts   types shared by the UI and the worker, the only seam
   pages.ts      page-range maths (deliberately free of any mupdf import)
+  match.ts      tolerant matching for redaction (also mupdf-free)
   draw.ts       content-stream drawing; the ONE place coordinates flip
   shared.ts     engine-internal helpers
   jobs/         every PDF capability, as plain functions over MuPDF
@@ -98,6 +99,10 @@ Each of these cost real debugging time and is commented at the source:
   script that parses colours as `rgb()` will read those three numbers as RGB
   and report nonsense. `e2e/audit.e2e.ts` resolves colours by painting them
   into a canvas and reading the pixel back.
+- **MuPDF's JS search silently stops at 500 quads per page** (`runSearch`,
+  `max_hits`). Redaction therefore does not use it: `findMatches` walks the
+  structured-text glyphs itself, so it has no cap and can ignore case,
+  accents, line breaks and hyphenation.
 - **The markdown parser drops the last character** when input does not end in
   a newline. Normalised on the way in.
 - **`@tailwindcss/forms` paints every text control `#fff`** and leaves `color`

@@ -1,7 +1,7 @@
 /** Passwords, permissions, redaction, sanitising, damage and repair. */
 import * as mupdf from 'mupdf';
 import type { DocHandle, OutputFile } from '../contract';
-import { EngineError, allPages, pagesOf, toOutput, type JobContext } from '../shared';
+import { EngineError, allPages, copyDocument, pagesOf, toOutput, type JobContext } from '../shared';
 
 /**
  * PDF permission bits, ISO 32000-1 Table 22 (bit N of the spec is 1 << (N-1)).
@@ -184,7 +184,8 @@ export const securityJobs = {
 		}
 	): OutputFile {
 		if (params.areas.length === 0) throw new EngineError('Marque pelo menos uma área para tarjar');
-		const doc = ctx.get(params.handle);
+		// A copy, so reviewing and redacting again starts from the original text.
+		const doc = copyDocument(ctx.get(params.handle));
 
 		const byPage = new Map<number, [number, number, number, number][]>();
 		for (const area of params.areas) {

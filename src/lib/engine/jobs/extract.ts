@@ -2,6 +2,7 @@
 import * as mupdf from 'mupdf';
 import type { DocHandle, OutputFile } from '../contract';
 import { EngineError, allPages, pageRotation, pagesOf, type JobContext } from '../shared';
+import { findMatches, type Glyph, type Match, type MatchMode } from '../match';
 
 /** Hard-coded `max_hits` of MuPDF 1.28's `runSearch`, counted in quads per page. */
 const SEARCH_QUAD_CAP = 500;
@@ -224,6 +225,43 @@ export const extractJobs = {
 			}
 		}
 		return hits;
+	},
+
+	/**
+	 * Tolerant search for redaction: ignores case and accents, spans line
+	 * breaks and hyphenation, and classifies each hit (see `match.ts`). Walks
+	 * the glyphs itself, so MuPDF's per-page search cap does not apply.
+	 */
+	findMatches(
+		ctx: JobContext,
+		params: { handle: DocHandle; query: string; mode?: MatchMode; pages?: number[] }
+	): Match[] {
+		const doc = ctx.get(params.handle);
+		const out: Match[] = [];
+		for (const index of pagesOf(doc, params.pages)) {
+			ctx.checkCancelled();
+			const glyphs: Glyph[] = [];
+			let line = -1;
+			doc
+				.loadPage(index)
+				.toStructuredText('preserve-whitespace')
+				.walk({
+					beginLine: () => void line++,
+					onChar: (c, _origin, _font, _size, q) =>
+						void glyphs.push({
+							c,
+							line,
+							rect: [
+								Math.min(q[0], q[2], q[4], q[6]),
+								Math.min(q[1], q[3], q[5], q[7]),
+								Math.max(q[0], q[2], q[4], q[6]),
+								Math.max(q[1], q[3], q[5], q[7])
+							]
+						})
+				});
+			out.push(...findMatches(index, glyphs, params.query, params.mode));
+		}
+		return out;
 	},
 
 	/** Everything an inspector panel wants to show about a file. */

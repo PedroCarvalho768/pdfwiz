@@ -137,4 +137,5 @@ export { PAGE_SIZES } from './organize';
 export { PERMISSION_BITS, permissionMask, type PermissionName } from './security';
 export type { TextLine } from './edit';
 export type { DocumentReport, OutlineEntry, SearchHit } from './extract';
+export type { Match, MatchKind, MatchMode } from '../match';
 export type { CompressResult } from './optimize';

@@ -60,15 +60,10 @@ function hits(text: string) {
 	return found;
 }
 
-// ponytail: redact-pdf is being redesigned on another branch, which owns its
-// copy ("ocorrencias", "e apagado"). Remove this exemption when it lands.
-const PENDING_REDESIGN = new Set(['redact-pdf']);
-
 /** Every string the catalog shows: titles, blurbs, notes, field copy. */
 function catalogCopy(): [string, string][] {
 	const out: [string, string][] = [];
 	for (const tool of tools) {
-		if (PENDING_REDESIGN.has(tool.id)) continue;
 		const at = (part: string) => `${tool.id} ${part}`;
 		out.push([at('title'), tool.title], [at('blurb'), tool.blurb], [at('group'), tool.group]);
 		if (tool.note) out.push([at('note'), tool.note]);
@@ -118,10 +113,8 @@ function proseOf(source: string, svelte: boolean): string[] {
 		// Developer diagnostics, not interface copy.
 		.replace(/console\.\w+\([^)]*\)/g, ' ')
 		.replace(/keywords:\s*\[[^\]]*\]/g, ' ');
-	for (const id of PENDING_REDESIGN)
-		code = code.replace(new RegExp(`id: '${id}',[\\s\\S]*?\\n\\t\\},`), ' ');
 	// Template interpolations, innermost first so nested literals go too. The
-	// placeholder is neither a letter nor a space, so `${stem}-rotated.pdf`
+	// placeholder is neither a letter nor a space, so `${stem}-girado.pdf`
 	// still reads as one code-like token.
 	for (let previous = ''; previous !== code;) {
 		previous = code;

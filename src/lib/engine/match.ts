@@ -194,6 +194,14 @@ export function findMatches(
 		return out.replace(/\s+/gu, ' ');
 	};
 
+	/** True when glyphs `a` and `b` are both inside the page and both part of one word. */
+	const splitsWord = (a: number, b: number) =>
+		a >= 0 &&
+		b < glyphs.length &&
+		!isSpace(glyphs[a].c) &&
+		!isSpace(glyphs[b].c) &&
+		glyphs[a].line === glyphs[b].line;
+
 	return findSpans(index, needle, mode).map(({ start, end, kind }) => {
 		const from = index.glyphOf[start];
 		const to = index.glyphOf[end - 1];
@@ -201,8 +209,13 @@ export function findMatches(
 			page,
 			kind,
 			text: chars(from, to + 1).trim(),
-			before: chars(from - CONTEXT, from).trimStart(),
-			after: chars(to + 1, to + 1 + CONTEXT).trimEnd(),
+			// Where the window splits a word, drop the fragment.
+			before: splitsWord(from - CONTEXT - 1, from - CONTEXT)
+				? chars(from - CONTEXT, from).replace(/^\S*\s/u, '')
+				: chars(from - CONTEXT, from).trimStart(),
+			after: splitsWord(to + CONTEXT, to + 1 + CONTEXT)
+				? chars(to + 1, to + 1 + CONTEXT).replace(/\s\S*$/u, '')
+				: chars(to + 1, to + 1 + CONTEXT).trimEnd(),
 			rects: unionByLine(glyphs, from, to)
 		};
 	});

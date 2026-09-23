@@ -48,7 +48,7 @@ test('a field-driven tool renders its form and applies the values', async ({ pag
 
 	const result = await grabDownload(page, () => downloadButton(page).click());
 	// Named after the file, not the PDF's /Title.
-	expect(result.name).toBe('two-rotated.pdf');
+	expect(result.name).toBe('two-girado.pdf');
 	const saved = openPdf(result.bytes).asPDF()!;
 	const rotationOf = (i: number) => {
 		const value = saved.loadPage(i).getObject().get('Rotate');
@@ -144,24 +144,38 @@ test('a locked file in a batch pauses the queue instead of dropping files', asyn
 	]);
 });
 
-test('redaction removes the text from the downloaded file', async ({ page }) => {
+test('redaction reviews tolerant matches and removes only the checked ones', async ({ page }) => {
 	await page.goto('/redact-pdf');
-	await page.setInputFiles('input[type=file]', fixturePdf('s.pdf', ['TOPSECRET']));
+	await page.setInputFiles(
+		'input[type=file]',
+		fixturePdf('s.pdf', ['Assinado por JOÃO DA SILVA', 'Testemunha Silvana Costa'])
+	);
 
-	await page.getByLabel('Texto a remover').fill('TOPSECRET');
-	await page.getByRole('button', { name: 'Tarjar texto' }).click();
+	// Lower case, no accent: still an exact match. "Silvana" is only partial.
+	await page.getByLabel('Texto a remover').fill('joao da silva');
+	await expect(page.getByText('1 ocorrência encontrada')).toBeVisible();
+	await page.getByLabel('Texto a remover').fill('silva');
+	await expect(page.getByRole('heading', { name: 'Ocorrências exatas (1)' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Dentro de outras palavras (1)' })).toBeVisible();
+	await expect(page.getByRole('checkbox', { name: /Silvana/ })).not.toBeChecked();
+	await expect(page.getByRole('checkbox', { name: /SILVA/ })).toBeChecked();
 
-	await expect(page.getByText(/1 ocorrência .* removida/)).toBeVisible();
+	await page.getByRole('button', { name: 'Tarjar 1 ocorrência' }).click();
+	await expect(page.getByText('1 ocorrência removida em 1 página.')).toBeVisible();
 	const result = await grabDownload(page, () => downloadButton(page).click());
-	expect(textOf(openPdf(result.bytes), 0)).not.toContain('TOPSECRET');
+	const doc = openPdf(result.bytes);
+	expect(textOf(doc, 0)).not.toContain('SILVA');
+	// The unchecked partial match survives, and so does the rest of the text.
+	expect(textOf(doc, 1)).toContain('Silvana');
+	expect(textOf(doc, 0)).toContain('Assinado por');
 });
 
-test('searching for absent text reports it instead of producing a file', async ({ page }) => {
+test('searching for absent text says so and offers nothing to redact', async ({ page }) => {
 	await page.goto('/redact-pdf');
 	await page.setInputFiles('input[type=file]', fixturePdf('s.pdf', ['Hello']));
 	await page.getByLabel('Texto a remover').fill('NotPresent');
-	await page.getByRole('button', { name: 'Tarjar texto' }).click();
-	await expect(page.getByRole('alert')).toContainText(/não aparece/);
+	await expect(page.getByText('Nada encontrado para "NotPresent".')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Marque o que tarjar' })).toBeDisabled();
 });
 
 test('a text export shows a preview alongside the download', async ({ page }) => {
