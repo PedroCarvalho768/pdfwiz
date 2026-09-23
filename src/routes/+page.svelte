@@ -3,14 +3,29 @@
 	import LocalProof from '$lib/ui/LocalProof.svelte';
 	import { groups, inGroup, searchTools, tools } from '$lib/tools/registry';
 	import { SITE_URL, SOURCE_URL } from '$lib/ui/site';
+	import { version } from '../../package.json';
 
-	const title = `Aegis, ${tools.length} ferramentas de PDF que não sobem seu arquivo`;
+	const title = `Aegis: ${tools.length} ferramentas de PDF que rodam no seu navegador`;
 	const description =
-		'Junte, divida, edite, converta, comprima, assine, tarje e tire a senha de PDFs de graça. Cada arquivo é processado no seu próprio dispositivo. Nada é enviado.';
+		'Software livre (AGPL) para juntar, dividir, editar, converter, comprimir, tarjar e proteger PDFs. O MuPDF roda compilado para WebAssembly na sua aba; nenhum arquivo é enviado.';
 
 	let query = $state('');
 	const matches = $derived(searchTools(query));
 	const filtering = $derived(query.trim().length > 0);
+
+	/** Stated plainly, the same ceilings the README lists. */
+	const LIMITS = [
+		'Editar texto não reflui o parágrafo: a linha é redesenhada numa fonte padrão no mesmo lugar.',
+		'Word e Excel passam por HTML: a estrutura sobrevive, o layout exato não.',
+		'PDF para Word reconstrói parágrafos a partir do texto; tabelas, colunas e imagens não voltam.',
+		'Assinar põe uma imagem na página. Não é assinatura criptográfica.',
+		'Tons de cinza e achatar em imagens rasterizam a página e apagam a camada de texto.',
+		'O OCR baixa o modelo do idioma do cdn.jsdelivr.net no primeiro uso. O documento continua aqui.'
+	];
+
+	const heading = 'font-mono text-sm font-semibold text-ink';
+	const indent = 'mt-3 pl-4 sm:pl-8';
+	const link = 'text-ink underline decoration-line underline-offset-4 hover:decoration-accent';
 </script>
 
 <svelte:head>
@@ -23,124 +38,144 @@
 	<meta property="og:url" content="{SITE_URL}/" />
 </svelte:head>
 
-<!-- Hero. One asymmetric split: the claim on the left, the proof of it on
-     the right. The panel is the only place on the page that goes dark. -->
-<section
-	class="mx-auto grid w-full max-w-6xl gap-10 px-4 pt-14 pb-20 lg:grid-cols-[1fr_1.05fr] lg:items-center lg:gap-14 lg:pt-20"
->
-	<div>
-		<h1 class="display text-[clamp(2.5rem,5.4vw,4.25rem)]">Seu PDF não sai desta aba.</h1>
-		<p class="mt-6 max-w-[46ch] text-lg text-muted">
-			{tools.length} ferramentas que rodam dentro do seu navegador. Sem envio de arquivos, sem conta,
-			sem servidor que possa guardar uma cópia.
+<!-- Laid out as a man page: the project describes itself the way a tool
+     does, section by section, instead of pitching. The one live element is
+     the drop panel under SINOPSE, because the claim is only worth making if
+     the page can demonstrate it. -->
+<div class="mx-auto w-full max-w-4xl px-4 pt-10 pb-20 lg:pt-14">
+	<!-- eslint-disable svelte/no-navigation-without-resolve -->
+	<p
+		class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-3 font-mono text-sm text-muted"
+	>
+		<span class="text-ink">aegis(1)</span>
+		<span>
+			v{version} · AGPL-3.0 ·
+			<a class={link} href={SOURCE_URL}>código-fonte</a>
+		</span>
+	</p>
+
+	<section class="mt-10" aria-labelledby="nome">
+		<h2 id="nome" class={heading}>NOME</h2>
+		<h1 class="{indent} text-[clamp(1.6rem,3.6vw,2.4rem)] leading-tight font-semibold text-ink">
+			aegis <span class="text-muted">·</span>
+			{tools.length} ferramentas de PDF que rodam na sua aba
+		</h1>
+	</section>
+
+	<section class="mt-10" aria-labelledby="sinopse">
+		<h2 id="sinopse" class={heading}>SINOPSE</h2>
+		<p class="{indent} font-mono text-sm text-muted">
+			<span class="text-ink">seu arquivo</span> → MuPDF (WebAssembly, num worker) →
+			<span class="text-ink">resultado para baixar</span>
 		</p>
-		<div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
-			<a
-				href="#tools"
-				class="rounded-[var(--radius-control)] bg-accent px-6 py-3 font-medium text-accent-ink transition-transform duration-150 ease-out hover:brightness-110 active:scale-[0.98]"
-			>
-				Achar uma ferramenta
-			</a>
-			<!-- eslint-disable svelte/no-navigation-without-resolve -->
-			<a
-				href={SOURCE_URL}
-				class="text-sm font-medium text-ink underline decoration-line underline-offset-4 hover:decoration-accent"
-			>
-				Ver o código
-			</a>
-			<!-- eslint-enable svelte/no-navigation-without-resolve -->
+		<p class="{indent} max-w-[62ch] text-muted">
+			Não existe servidor para receber o arquivo, então nada é enviado. Solte um PDF abaixo: as
+			páginas são desenhadas aqui mesmo e os números vêm dessa execução, inclusive o tráfego de
+			rede.
+		</p>
+		<div class="{indent} max-w-3xl">
+			<LocalProof />
 		</div>
-	</div>
+	</section>
 
-	<LocalProof />
-</section>
-
-<!-- Why it is built this way. Prose, not cards: three equal feature cards is
-     the category default and says less than four sentences. -->
-<section class="border-y border-line bg-surface">
-	<div class="mx-auto w-full max-w-6xl px-4 py-16 lg:py-24">
-		<h2 class="display max-w-[20ch] text-[clamp(1.85rem,3.4vw,2.9rem)]">
-			Todo outro site de PDF sobe o seu arquivo para poder editá-lo.
-		</h2>
-		<div class="mt-8 grid gap-x-14 gap-y-4 text-muted md:grid-cols-2">
-			<p class="max-w-[62ch]">
-				Um contrato, um holerite, a cópia do seu passaporte. Para juntar duas páginas, as
-				ferramentas de sempre precisam de uma cópia nos servidores delas, e você fica com a promessa
-				de que ela será apagada depois.
+	<section class="mt-12" aria-labelledby="descricao">
+		<h2 id="descricao" class={heading}>DESCRIÇÃO</h2>
+		<div class="{indent} max-w-[66ch] space-y-4 text-muted">
+			<p>
+				Quase todo o trabalho é do <a class={link} href="https://mupdf.com/">MuPDF</a>: juntar,
+				desenhar páginas, extrair texto, tarjar de verdade, formulários, criptografia, compressão e
+				reparo. O build de <span class="tabular text-ink">3,6 MB</span> é baixado uma vez, na primeira
+				vez que você solta um arquivo, e roda num worker na sua máquina.
 			</p>
-			<p class="max-w-[62ch]">
-				O Aegis não tem servidor nenhum para onde mandar. O motor inteiro, um build de
-				<span class="font-medium text-ink">3,6 MB</span> do
+			<p>
+				O site é só arquivos estáticos. Não há conta, rastreio nem banco de dados, e a política de
+				segurança da página só permite conexões com o próprio site e, no OCR, com o servidor do
+				modelo de idioma.
+			</p>
+		</div>
+	</section>
+
+	<section class="mt-12" aria-labelledby="limites">
+		<h2 id="limites" class={heading}>LIMITES</h2>
+		<ul class="{indent} max-w-[66ch] space-y-2 text-muted">
+			{#each LIMITS as limit (limit)}
+				<li class="flex gap-3">
+					<span class="font-mono text-muted select-none" aria-hidden="true">-</span>
+					<span>{limit}</span>
+				</li>
+			{/each}
+		</ul>
+	</section>
+
+	<section id="tools" class="mt-12 scroll-mt-20" aria-labelledby="ferramentas">
+		<div class="flex flex-wrap items-baseline justify-between gap-4">
+			<h2 id="ferramentas" class={heading}>FERRAMENTAS ({tools.length})</h2>
+			<label class="w-full max-w-xs">
+				<span class="sr-only">Buscar ferramentas</span>
+				<input
+					type="search"
+					name="busca"
+					autocomplete="off"
+					placeholder="juntar, comprimir, senha…"
+					class="w-full rounded-[var(--radius-control)] border-line bg-surface px-3 py-2 font-mono text-sm text-ink placeholder:text-muted focus:border-accent focus:ring-1 focus:ring-accent"
+					bind:value={query}
+				/>
+			</label>
+		</div>
+
+		{#snippet row(tool: (typeof tools)[number])}
+			<li>
 				<a
-					class="text-ink underline decoration-line underline-offset-4 hover:decoration-accent"
-					href="https://mupdf.com/">MuPDF</a
-				>, é baixado uma vez e roda num worker na sua máquina. O site são arquivos estáticos numa
-				CDN. É também por isso que ele é gratuito e continua gratuito: ninguém está pagando por
-				processamento, então não há nada a recuperar.
-			</p>
-		</div>
-	</div>
-</section>
+					href={resolve('/[tool]', { tool: tool.id })}
+					class="group flex items-baseline gap-3 border-b border-line py-2 transition-colors hover:border-accent"
+				>
+					<span class="font-medium text-ink group-hover:text-accent">{tool.title}</span>
+					<span class="min-w-0 flex-1 truncate text-sm text-muted">{tool.blurb}</span>
+				</a>
+			</li>
+		{/snippet}
 
-<!-- The index. 52 tools want a dense, scannable list, not 52 identical
-     cards: the card grid is what this category does and it makes finding a
-     named tool slower, not faster. -->
-<section id="tools" class="mx-auto w-full max-w-6xl scroll-mt-20 px-4 py-16 lg:py-24">
-	<div class="flex flex-wrap items-end justify-between gap-6">
-		<h2 class="display text-[clamp(1.75rem,3vw,2.5rem)]">Todas as {tools.length} ferramentas</h2>
-
-		<label class="w-full max-w-sm">
-			<span class="sr-only">Buscar ferramentas</span>
-			<input
-				type="search"
-				name="busca"
-				autocomplete="off"
-				placeholder="juntar, comprimir, senha, converter"
-				class="w-full rounded-[var(--radius-control)] border-line bg-surface px-4 py-2.5 text-ink placeholder:text-muted focus:border-accent focus:ring-1 focus:ring-accent"
-				bind:value={query}
-			/>
-		</label>
-	</div>
-
-	{#snippet row(tool: (typeof tools)[number])}
-		<li>
-			<a
-				href={resolve('/[tool]', { tool: tool.id })}
-				class="group flex items-baseline gap-3 border-b border-line py-2.5 transition-colors hover:border-accent"
-			>
-				<span class="font-medium text-ink group-hover:text-accent">{tool.title}</span>
-				<span class="min-w-0 flex-1 truncate text-sm text-muted">{tool.blurb}</span>
-			</a>
-		</li>
-	{/snippet}
-
-	{#if filtering}
-		{#if matches.length === 0}
-			<p class="mt-10 text-muted">
-				Nada encontrado para “{query}”. Limpe a busca para ver as {tools.length} ferramentas.
-			</p>
-		{:else}
-			<ul class="mt-10 columns-1 gap-x-12 md:columns-2">
-				{#each matches as tool (tool.id)}
-					{@render row(tool)}
-				{/each}
-			</ul>
-		{/if}
-	{:else}
-		<!-- Multi-column, not a 2-col grid: the groups are wildly different
-		     lengths, and a grid leaves a dead gap under the short ones. Columns
-		     balance the flow automatically. -->
-		<div class="mt-10 gap-x-12 md:columns-2">
-			{#each groups() as group (group)}
-				<section class="mb-9 inline-block w-full min-w-0 break-inside-avoid align-top">
-					<h3 class="text-sm font-semibold text-accent">{group}</h3>
-					<ul class="mt-2">
-						{#each inGroup(group) as tool (tool.id)}
+		<div class={indent}>
+			{#if filtering}
+				{#if matches.length === 0}
+					<p class="text-muted">
+						Nada encontrado para “{query}”. Limpe a busca para ver as {tools.length} ferramentas.
+					</p>
+				{:else}
+					<ul class="columns-1 gap-x-12 md:columns-2">
+						{#each matches as tool (tool.id)}
 							{@render row(tool)}
 						{/each}
 					</ul>
-				</section>
-			{/each}
+				{/if}
+			{:else}
+				<!-- Columns, not a grid: the groups differ wildly in length and
+				     columns balance the flow without dead gaps. -->
+				<div class="gap-x-12 md:columns-2">
+					{#each groups() as group (group)}
+						<section class="mb-8 inline-block w-full min-w-0 break-inside-avoid align-top">
+							<h3 class="font-mono text-sm text-accent">{group.toLowerCase()}</h3>
+							<ul class="mt-1">
+								{#each inGroup(group) as tool (tool.id)}
+									{@render row(tool)}
+								{/each}
+							</ul>
+						</section>
+					{/each}
+				</div>
+			{/if}
 		</div>
-	{/if}
-</section>
+	</section>
+
+	<section class="mt-12" aria-labelledby="codigo">
+		<h2 id="codigo" class={heading}>CÓDIGO</h2>
+		<p class="{indent} max-w-[66ch] text-muted">
+			Software livre sob a <a class={link} href="https://www.gnu.org/licenses/agpl-3.0.html"
+				>GNU AGPL v3 ou posterior</a
+			>, porque o MuPDF também é AGPL. O código está em
+			<a class={link} href={SOURCE_URL}>{SOURCE_URL.replace('https://', '')}</a>; bugs e ideias vão
+			nas <a class={link} href="{SOURCE_URL}/issues">issues</a>.
+		</p>
+	</section>
+	<!-- eslint-enable svelte/no-navigation-without-resolve -->
+</div>

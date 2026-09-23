@@ -55,9 +55,10 @@ Four rules keep 52 tools from turning into sprawl:
 Tokens live in `src/routes/layout.css`, authored in OKLCH and named by role
 (`--color-bg`, `--color-ink`, `--color-accent`), never by shade.
 
-- **Type:** Archivo Variable driven on its width axis for display, Fragment
-  Mono for measured numbers only. Both self-hosted via `@fontsource`; no
-  render-blocking font CDN.
+- **Type:** Archivo Variable for prose and titles, Fragment Mono for
+  structure and measurements: the homepage's man-page section headings, the
+  pipeline line and every measured number. Both self-hosted via
+  `@fontsource`; no render-blocking font CDN.
 - **Colour:** one committed petrol accent (H 205). Deliberately not the
   category reflex (PDF tools are red: Adobe, iLovePDF, Smallpdf) and not the
   software reflex (indigo). Neutrals are tinted toward the same hue.
@@ -66,11 +67,13 @@ Tokens live in `src/routes/layout.css`, authored in OKLCH and named by role
   workbench holds white pages and stays dark in both.
 - **Radius:** one system. Cards 12px, controls 8px.
 
-The signature moment: **drop a PDF on the homepage and it renders your real
-pages in the hero, beside numbers that were measured rather than written,
-including the count of network requests made while processing.** It stays at
-zero because there is no server. A site that uploads your file cannot ship
-that component.
+The homepage is laid out as a man page (NOME, SINOPSE, DESCRIÇÃO, LIMITES,
+FERRAMENTAS, CÓDIGO): a free-software project describing itself, not a
+product pitching. Its one live element sits under SINOPSE: **drop a PDF and
+it renders your real pages beside numbers measured from that run, including
+the network traffic while processing.** It stays at zero because there is
+no server. The section headings are literal uppercase text, not
+`text-transform`, so the audit's eyebrow rule still means something.
 
 ### Things that will bite you
 

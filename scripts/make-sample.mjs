@@ -19,64 +19,64 @@ const encode = (s) => new TextEncoder().encode(s);
  * document someone actually needs to fix, not a design mockup.
  */
 const PAGES = [
-	`# Service Agreement
+	`# Contrato de Prestação de Serviços
 
-**Between** Halden Survey Ltd and the Client.
+**Entre** Levantamentos Halden Ltda. e o Contratante.
 
-This agreement sets out the terms under which survey work is carried out,
-what each party is responsible for, and how the work is invoiced.
+Este contrato define as condições em que o levantamento é feito, as
+responsabilidades de cada parte e a forma de cobrança.
 
-## 1. Scope
+## 1. Objeto
 
-The supplier will carry out the survey described in Schedule A and deliver a
-written report within twenty working days of the site visit.
+A contratada fará o levantamento descrito no Anexo A e entregará um
+relatório escrito em até vinte dias úteis após a visita ao local.
 
-## 2. Fees
+## 2. Honorários
 
-Fees are fixed for the scope in Schedule A. Work outside that scope is
-agreed in writing before it starts.
+Os honorários são fixos para o escopo do Anexo A. Trabalho fora desse
+escopo é combinado por escrito antes de começar.
 
-## 3. Confidentiality
+## 3. Confidencialidade
 
-Neither party discloses the other's confidential information without written
-consent, during the agreement or after it ends.
+Nenhuma das partes divulga informação confidencial da outra sem
+consentimento escrito, durante o contrato ou depois dele.
 `,
-	`## 4. Liability
+	`## 4. Responsabilidade
 
-The supplier's total liability under this agreement is limited to the fees
-paid for the work giving rise to the claim.
+A responsabilidade total da contratada limita-se aos honorários pagos pelo
+trabalho que deu origem à reclamação.
 
-## 5. Termination
+## 5. Rescisão
 
-Either party may end this agreement with thirty days' written notice. Work
-completed up to that date remains payable.
+Qualquer parte pode encerrar este contrato com aviso escrito de trinta
+dias. O trabalho feito até essa data continua devido.
 
-## Schedule A
+## Anexo A
 
-| Item | Detail |
+| Item | Detalhe |
 | --- | --- |
-| Site | Unit 4, Halden Industrial Estate |
-| Survey type | Measured building survey |
-| Deliverable | Report, floor plans, elevations |
-| Site visit | Within 10 working days |
+| Local | Galpão 4, Distrito Industrial Halden |
+| Tipo | Levantamento métrico da edificação |
+| Entrega | Relatório, plantas e fachadas |
+| Visita | Em até 10 dias úteis |
 `,
-	`## Signatures
+	`## Assinaturas
 
-Signed for and on behalf of Halden Survey Ltd.
+Pela Levantamentos Halden Ltda.
 
-Name: ..............................................
+Nome: ..............................................
 
-Position: ..........................................
+Cargo: .............................................
 
-Date: ..............................................
+Data: ..............................................
 
-Signed for and on behalf of the Client.
+Pelo Contratante.
 
-Name: ..............................................
+Nome: ..............................................
 
-Position: ..........................................
+Cargo: .............................................
 
-Date: ..............................................
+Data: ..............................................
 `
 ];
 

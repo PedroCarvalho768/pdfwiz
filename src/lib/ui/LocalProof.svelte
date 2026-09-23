@@ -131,88 +131,65 @@
 	role="region"
 	aria-label="Teste aqui"
 >
-	<!-- The page stack. Real renders, fanned so the panel reads as documents
-	     rather than as a grid of images. -->
-	<div
-		class="flex min-h-[15rem] items-end justify-center gap-0 px-4 pt-8 sm:min-h-[20rem] sm:px-6 sm:pt-10"
-	>
+	<!-- Real renders in a plain row, numbered like a listing. Until a file
+	     arrives, the sample was drawn by the same engine at build time. -->
+	<div class="flex gap-3 overflow-hidden px-4 pt-5 sm:px-5">
 		{#each shown.slice(0, 6) as src, index (src)}
-			<img
-				{src}
-				alt=""
-				width="840"
-				height="1190"
-				loading={index === 0 ? 'eager' : 'lazy'}
-				fetchpriority={index === 0 ? 'high' : 'auto'}
-				decoding="async"
-				class="h-32 w-auto rounded-[3px] bg-white object-cover object-top shadow-[0_20px_44px_-12px_rgba(0,0,0,0.6)] transition-[transform,opacity] duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] sm:h-48 lg:h-64"
-				style="
-					transform: rotate({(index - (Math.min(shown.length, 6) - 1) / 2) * 4.5}deg)
-						translateY({Math.abs(index - (Math.min(shown.length, 6) - 1) / 2) * 10}px);
-					margin-inline: {index === 0 ? 0 : -0.75}rem;
-					z-index: {10 - index};
-					opacity: {thumbs.length ? 1 : 0.9};
-				"
-			/>
+			<figure class="min-w-0 shrink-0 basis-[calc((100%-1.5rem)/3)] sm:basis-[calc((100%-3rem)/5)]">
+				<img
+					{src}
+					alt=""
+					width="840"
+					height="1190"
+					loading={index === 0 ? 'eager' : 'lazy'}
+					fetchpriority={index === 0 ? 'high' : 'auto'}
+					decoding="async"
+					class="aspect-[1/1.414] w-full rounded-[2px] bg-white object-cover object-top"
+				/>
+				<figcaption class="tabular mt-1.5 text-xs text-panel-muted">p. {index + 1}</figcaption>
+			</figure>
 		{/each}
 	</div>
 
-	<div class="border-t border-panel-ink/12 p-5 sm:p-6">
+	<div class="mt-4 border-t border-panel-ink/12 px-4 py-4 font-mono text-sm sm:px-5">
 		{#if measured}
 			<!-- Measured, not claimed. Every number here came from the run that
 			     just happened. -->
-			<dl class="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-				<div>
-					<dt class="text-xs text-panel-muted">Tráfego de rede</dt>
-					<dd class="tabular mt-0.5 text-lg text-panel-accent">
-						{formatBytes(measured.transferred)}
-					</dd>
-				</div>
-				<div>
-					<dt class="text-xs text-panel-muted">Requisições de rede</dt>
-					<dd class="tabular mt-0.5 text-lg text-panel-accent">{measured.requests}</dd>
-				</div>
-				<div>
-					<dt class="text-xs text-panel-muted">Lido neste dispositivo</dt>
-					<dd class="tabular mt-0.5 text-lg">{formatBytes(measured.bytes)}</dd>
-				</div>
-				<div>
-					<dt class="text-xs text-panel-muted">Renderizado em</dt>
-					<dd class="tabular mt-0.5 text-lg">{measured.ms} ms</dd>
-				</div>
+			<dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1">
+				<dt class="text-panel-muted">arquivo</dt>
+				<dd class="truncate">
+					{measured.name} ({measured.pages}
+					{measured.pages === 1 ? 'página' : 'páginas'}, {formatBytes(measured.bytes)})
+				</dd>
+				<dt class="text-panel-muted">desenhado em</dt>
+				<dd class="tabular">{measured.ms} ms</dd>
+				<dt class="text-panel-muted">rede</dt>
+				<dd class="tabular text-panel-accent">
+					{measured.requests}
+					{measured.requests === 1 ? 'requisição' : 'requisições'}, {formatBytes(
+						measured.transferred
+					)}
+				</dd>
 			</dl>
-
-			<p class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-panel-muted">
-				<span class="truncate"
-					>{measured.name}, {measured.pages}
-					{measured.pages === 1 ? 'página' : 'páginas'}.</span
-				>
-				<button
-					type="button"
-					class="font-medium text-panel-ink underline underline-offset-4 hover:text-panel-accent"
-					onclick={reset}
-				>
-					Limpar
-				</button>
-			</p>
+			<button
+				type="button"
+				class="mt-3 min-h-6 text-panel-ink underline underline-offset-4 hover:text-panel-accent"
+				onclick={reset}
+			>
+				limpar
+			</button>
 		{:else}
-			<div class="flex flex-wrap items-center justify-between gap-4" aria-live="polite">
-				<div>
-					<p class="font-medium">
-						{busy ? 'Lendo no seu dispositivo' : 'Solte um PDF para ver acontecer'}
-					</p>
-					<p class="mt-1 text-sm text-panel-muted">
-						Nada é enviado para lugar nenhum. Confira a aba de rede.
-					</p>
-				</div>
-
+			<div class="flex flex-wrap items-center justify-between gap-3" aria-live="polite">
+				<p class="text-panel-muted">
+					{busy ? 'lendo no seu dispositivo…' : 'solte um PDF aqui, ou'}
+				</p>
 				<button
 					type="button"
-					class="rounded-[var(--radius-control)] bg-accent px-5 py-2.5 font-medium text-accent-ink transition-transform duration-150 ease-out hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
+					class="rounded-[var(--radius-control)] border border-panel-ink/25 px-4 py-2 text-panel-ink hover:border-panel-accent hover:text-panel-accent disabled:opacity-60"
 					disabled={busy}
 					onclick={() => input.click()}
 				>
-					{busy ? 'Processando' : 'Escolher arquivo'}
+					{busy ? 'processando' : 'escolher arquivo'}
 				</button>
 			</div>
 		{/if}

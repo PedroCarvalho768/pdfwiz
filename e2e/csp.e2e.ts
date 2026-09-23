@@ -35,7 +35,9 @@ test('dropping a file on the homepage hero violates nothing', async ({ page }) =
 		.getByRole('region', { name: 'Teste aqui' })
 		.locator('input[type=file]')
 		.setInputFiles(fixturePdf('hero.pdf', ['Hero']));
-	await expect(page.getByText('Requisições de rede')).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByRole('term').filter({ hasText: /^rede$/ })).toBeVisible({
+		timeout: 30_000
+	});
 	expect(await violations()).toEqual([]);
 });
 
