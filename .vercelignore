@@ -1,0 +1,8 @@
+.claude
+.svelte-kit
+build
+test-results
+playwright-report
+node_modules
+.vscode
+.code-review-graph
