@@ -4,7 +4,7 @@
 </script>
 
 <svelte:head>
-	<title>{page.status === 404 ? 'Página não encontrada' : 'Algo deu errado'} | PDFWiz</title>
+	<title>{page.status === 404 ? 'Página não encontrada' : 'Algo deu errado'} | Aegis</title>
 	<meta name="robots" content="noindex" />
 </svelte:head>
 

@@ -1,4 +1,4 @@
-# PDFWiz
+# Aegis
 
 52 ferramentas de PDF que rodam inteiramente no navegador. Juntar, dividir,
 editar texto, converter, comprimir, assinar, tarjar, criptografar, tirar

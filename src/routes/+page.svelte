@@ -4,7 +4,7 @@
 	import { groups, inGroup, searchTools, tools } from '$lib/tools/registry';
 	import { SITE_URL, SOURCE_URL } from '$lib/ui/site';
 
-	const title = `PDFWiz, ${tools.length} ferramentas de PDF que não sobem seu arquivo`;
+	const title = `Aegis, ${tools.length} ferramentas de PDF que não sobem seu arquivo`;
 	const description =
 		'Junte, divida, edite, converta, comprima, assine, tarje e tire a senha de PDFs de graça. Cada arquivo é processado no seu próprio dispositivo. Nada é enviado.';
 
@@ -69,7 +69,7 @@
 				de que ela será apagada depois.
 			</p>
 			<p class="max-w-[62ch]">
-				O PDFWiz não tem servidor nenhum para onde mandar. O motor inteiro, um build de
+				O Aegis não tem servidor nenhum para onde mandar. O motor inteiro, um build de
 				<span class="font-medium text-ink">3,6 MB</span> do
 				<a
 					class="text-ink underline decoration-line underline-offset-4 hover:decoration-accent"
