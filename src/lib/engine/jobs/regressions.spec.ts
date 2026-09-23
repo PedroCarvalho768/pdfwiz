@@ -704,6 +704,18 @@ describe('fillForm (19)', () => {
 		expect(states).toEqual(['/Off', '/Blue']);
 	});
 
+	it('lists the export value of each button widget', () => {
+		const { ctx } = testContext();
+		const doc = open(ctx, buttonForm());
+		const fields = handlers.formFields(ctx, { handle: doc.handle });
+		expect(fields.map((f) => [f.name, f.exportValue])).toEqual([
+			['fullName', null],
+			['agree', 'Sim'],
+			['color', 'Red'],
+			['color', 'Blue']
+		]);
+	});
+
 	it('rejects a radio value that is not one of its options', () => {
 		const { ctx } = testContext();
 		const doc = open(ctx, buttonForm());

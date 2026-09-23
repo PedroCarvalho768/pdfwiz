@@ -389,6 +389,12 @@ export const editJobs = {
 		value: string;
 		options: string[];
 		readOnly: boolean;
+		/**
+		 * For a checkbox or radio widget, the value that turns THIS widget on
+		 * in fillForm (its on-state, e.g. "Yes", "Sim", "1"); null otherwise.
+		 * A radio group lists one entry per widget, all with the same name.
+		 */
+		exportValue: string | null;
 	}[] {
 		const doc = ctx.get(params.handle);
 		const out = [];
@@ -401,7 +407,8 @@ export const editJobs = {
 					type: widget.getFieldType(),
 					value: widget.getValue(),
 					options: widget.isChoice() ? widget.getOptions() : [],
-					readOnly: widget.isReadOnly()
+					readOnly: widget.isReadOnly(),
+					exportValue: widget.isCheckbox() || widget.isRadioButton() ? onStateOf(widget) : null
 				});
 			}
 		}
