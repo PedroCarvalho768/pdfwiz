@@ -20,7 +20,7 @@ export function downloadFile(file: OutputFile) {
  * out as one zip. PDFs are already deflated internally, so the entries are
  * stored rather than recompressed — same bytes, far less CPU.
  */
-export function downloadAll(files: OutputFile[], zipName = 'aegis.zip') {
+export function downloadAll(files: OutputFile[], zipName = 'kyme-pdf.zip') {
 	if (files.length === 1) {
 		downloadFile(files[0]);
 		return;

@@ -11,7 +11,7 @@ import { unzipSync } from 'fflate';
 import * as mupdf from 'mupdf';
 
 export function write(name: string, bytes: Uint8Array): string {
-	const path = join(mkdtempSync(join(tmpdir(), 'aegis-')), name);
+	const path = join(mkdtempSync(join(tmpdir(), 'kyme-')), name);
 	writeFileSync(path, bytes);
 	return path;
 }
@@ -77,7 +77,7 @@ export function formPdf(name: string): string {
 
 export async function grabDownload(page: Page, action: () => Promise<void>) {
 	const [download] = await Promise.all([page.waitForEvent('download'), action()]);
-	const path = join(mkdtempSync(join(tmpdir(), 'aegis-out-')), download.suggestedFilename());
+	const path = join(mkdtempSync(join(tmpdir(), 'kyme-out-')), download.suggestedFilename());
 	await download.saveAs(path);
 	return { name: download.suggestedFilename(), bytes: readFileSync(path), path };
 }

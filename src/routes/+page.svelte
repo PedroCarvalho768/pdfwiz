@@ -5,7 +5,7 @@
 	import { SITE_URL, SOURCE_URL } from '$lib/ui/site';
 	import { version } from '../../package.json';
 
-	const title = `Aegis: ${tools.length} ferramentas de PDF que rodam no seu navegador`;
+	const title = `Kyme PDF: ${tools.length} ferramentas que rodam no seu navegador`;
 	const description =
 		'Software livre (AGPL) para juntar, dividir, editar, converter, comprimir, tarjar e proteger PDFs. O MuPDF roda compilado para WebAssembly na sua aba; nenhum arquivo é enviado.';
 
@@ -47,7 +47,7 @@
 	<p
 		class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-3 font-mono text-sm text-muted"
 	>
-		<span class="text-ink">aegis(1)</span>
+		<span class="text-ink">kyme(1)</span>
 		<span>
 			v{version} · AGPL-3.0 ·
 			<a class={link} href={SOURCE_URL}>código-fonte</a>
@@ -57,7 +57,7 @@
 	<section class="mt-10" aria-labelledby="nome">
 		<h2 id="nome" class={heading}>NOME</h2>
 		<h1 class="{indent} text-[clamp(1.6rem,3.6vw,2.4rem)] leading-tight font-semibold text-ink">
-			aegis <span class="text-muted">·</span>
+			kyme <span class="text-muted">·</span>
 			{tools.length} ferramentas de PDF que rodam na sua aba
 		</h1>
 	</section>

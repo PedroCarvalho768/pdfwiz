@@ -36,7 +36,7 @@
 				class="display text-xl text-ink"
 				style="font-variation-settings: 'wdth' 118"
 			>
-				Aegis
+				Kyme PDF
 			</a>
 			<span class="flex items-center gap-2 text-sm text-muted">
 				<!-- Not decoration: the dot reports a real state, that processing
@@ -54,7 +54,7 @@
 	<footer class="border-t border-line bg-surface">
 		<div class="mx-auto w-full max-w-6xl px-4 py-10 text-sm text-muted">
 			<p class="max-w-[68ch]">
-				O Aegis é software livre sob a
+				O Kyme PDF é software livre sob a
 				<a
 					class="text-ink underline decoration-line underline-offset-4 hover:decoration-accent"
 					href="https://www.gnu.org/licenses/agpl-3.0.html">GNU AGPL v3</a

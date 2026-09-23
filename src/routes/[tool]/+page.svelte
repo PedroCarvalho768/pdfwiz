@@ -10,7 +10,7 @@
 
 	let { data }: { data: PageData } = $props();
 	const tool = $derived(data.tool);
-	const title = $derived(`${tool.title} de graça, no seu navegador | Aegis`);
+	const title = $derived(`${tool.title} de graça, no seu navegador | Kyme PDF`);
 	const url = $derived(`${SITE_URL}/${tool.id}`);
 </script>
 
