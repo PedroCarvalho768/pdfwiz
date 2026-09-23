@@ -5,7 +5,13 @@
  * created on first use, never at import time. Nothing should touch the engine
  * until the user actually hands us a file.
  */
-import type { DocInfo, Progress, WorkerIn, WorkerOut } from './contract';
+import {
+	CANCELLED_MESSAGE,
+	type DocInfo,
+	type Progress,
+	type WorkerIn,
+	type WorkerOut
+} from './contract';
 import type { JobName, JobParams, JobResult } from './jobs/index';
 
 export interface RunOptions<Chunk> {
@@ -64,9 +70,17 @@ function ensureWorker(): Worker {
 	};
 
 	// A worker-level error leaves every in-flight job unresolvable, so fail
-	// them loudly rather than hanging the UI forever.
-	worker.onerror = (event) => {
-		const failure = new EngineFailure(event.message || 'The PDF engine crashed');
+	// them loudly rather than hanging the UI forever, and drop the dead
+	// worker so the next run() starts a fresh one.
+	const self = worker;
+	self.onerror = (event) => {
+		console.error('PDF engine worker error', event.message, event);
+		if (worker === self) worker = undefined;
+		self.terminate();
+		const failure = new EngineFailure(
+			'O processamento de PDF parou inesperadamente. Tente de novo.',
+			'ENGINE_CRASHED'
+		);
 		for (const [id, entry] of pending) {
 			pending.delete(id);
 			entry.reject(failure);
@@ -86,37 +100,51 @@ export function run<N extends JobName>(
 	const id = `job-${nextId++}`;
 
 	return new Promise<JobResult<N>>((resolve, reject) => {
-		if (options.signal?.aborted) {
-			reject(new EngineFailure('Cancelled', 'CANCELLED'));
+		const { signal } = options;
+		if (signal?.aborted) {
+			reject(new EngineFailure(CANCELLED_MESSAGE, 'CANCELLED'));
 			return;
 		}
 
+		const onAbort = () => target.postMessage({ kind: 'cancel', id } satisfies WorkerIn);
+		// Settling removes the listener, so a long-lived signal does not
+		// accumulate one per job or send cancels for jobs long finished.
+		const settle =
+			<A extends unknown[]>(fn: (...args: A) => void) =>
+			(...args: A) => {
+				signal?.removeEventListener('abort', onAbort);
+				fn(...args);
+			};
+
 		pending.set(id, {
-			resolve: resolve as (value: unknown) => void,
-			reject,
+			resolve: settle(resolve as (value: unknown) => void),
+			reject: settle(reject),
 			onChunk: options.onChunk as ((chunk: never) => void) | undefined,
 			onProgress: options.onProgress
 		});
-
-		options.signal?.addEventListener(
-			'abort',
-			() => target.postMessage({ kind: 'cancel', id } satisfies WorkerIn),
-			{ once: true }
-		);
+		signal?.addEventListener('abort', onAbort, { once: true });
 
 		try {
 			target.postMessage({ kind: 'job', id, name, params } satisfies WorkerIn);
 		} catch (err) {
 			// Almost always a Svelte $state proxy: reactive objects cannot be
 			// structured-cloned. Hold worker results in $state.raw and pass
-			// plain values here.
-			pending.delete(id);
-			reject(
-				new EngineFailure(
-					`Could not send "${name}" to the engine — its parameters are not cloneable. ` +
-						`Use $state.raw for values that come back from the worker. (${(err as Error).message})`
-				)
+			// plain values here. The detail is for developers; users get a
+			// message they can act on.
+			console.error(
+				`Could not send "${name}" to the engine: its parameters are not cloneable. ` +
+					'Use $state.raw for values that come back from the worker.',
+				err
 			);
+			pending
+				.get(id)
+				?.reject(
+					new EngineFailure(
+						'Não foi possível enviar os dados para o processamento. Recarregue a página e tente de novo.',
+						'NOT_CLONEABLE'
+					)
+				);
+			pending.delete(id);
 		}
 	});
 }
@@ -128,7 +156,7 @@ export function run<N extends JobName>(
 export function shutdown(): void {
 	worker?.terminate();
 	worker = undefined;
-	const failure = new EngineFailure('The PDF engine was shut down', 'CANCELLED');
+	const failure = new EngineFailure('O processamento foi interrompido', 'CANCELLED');
 	for (const [id, entry] of pending) {
 		pending.delete(id);
 		entry.reject(failure);
@@ -161,7 +189,8 @@ export function magicFor(file: File): string {
 		tif: 'image/tiff',
 		tiff: 'image/tiff'
 	};
-	return byExtension[extension] ?? file.type ?? 'application/pdf';
+	// `||`, not `??`: an unknown type is the empty string, not undefined.
+	return byExtension[extension] || file.type || 'application/pdf';
 }
 
 /** Read a File and open it in the engine. */
