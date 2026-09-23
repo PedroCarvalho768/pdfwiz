@@ -5,11 +5,34 @@
  */
 import { EngineError } from './contract';
 
+export interface RangeOptions {
+	/**
+	 * Also accept the position just past the last page (`pageCount + 1`,
+	 * 0-based `pageCount`), meaning "at the end". Used by insertion tools
+	 * whose positions are "before page N".
+	 */
+	allowEnd?: boolean;
+}
+
 /** Expand a 1-based page selection like "1-3,7,12-" into 0-based indices. */
-export function parsePageRange(spec: string, pageCount: number): number[] {
+export function parsePageRange(
+	spec: string,
+	pageCount: number,
+	options: RangeOptions = {}
+): number[] {
 	const trimmed = spec.trim();
 	if (!trimmed || trimmed.toLowerCase() === 'all')
 		return Array.from({ length: pageCount }, (_, i) => i);
+
+	const last = options.allowEnd ? pageCount + 1 : pageCount;
+	// Validate before expanding: "1-1000000000" must not allocate a billion entries.
+	const check = (page: number) => {
+		if (page < 1 || page > last)
+			throw new EngineError(
+				`A página ${page} está fora do intervalo (o documento tem ${pageCount})`
+			);
+		return page;
+	};
 
 	const out: number[] = [];
 	for (const part of trimmed.split(',')) {
@@ -17,23 +40,18 @@ export function parsePageRange(spec: string, pageCount: number): number[] {
 		if (!chunk) continue;
 		const match = /^(\d*)\s*-\s*(\d*)$/.exec(chunk);
 		if (match) {
-			const from = match[1] ? parseInt(match[1], 10) : 1;
-			const to = match[2] ? parseInt(match[2], 10) : pageCount;
+			const from = check(match[1] ? parseInt(match[1], 10) : 1);
+			const to = check(match[2] ? parseInt(match[2], 10) : pageCount);
 			if (from > to)
 				throw new EngineError(`Intervalo inválido "${chunk}": o início vem depois do fim`);
 			for (let p = from; p <= to; p++) out.push(p - 1);
 		} else if (/^\d+$/.test(chunk)) {
-			out.push(parseInt(chunk, 10) - 1);
+			out.push(check(parseInt(chunk, 10)) - 1);
 		} else {
 			throw new EngineError(`Não entendi a seleção de páginas "${chunk}"`);
 		}
 	}
 
-	const bad = out.find((i) => i < 0 || i >= pageCount);
-	if (bad !== undefined)
-		throw new EngineError(
-			`A página ${bad + 1} está fora do intervalo (o documento tem ${pageCount})`
-		);
 	if (out.length === 0) throw new EngineError('Essa seleção não corresponde a nenhuma página');
 	return out;
 }

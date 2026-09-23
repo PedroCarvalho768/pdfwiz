@@ -70,6 +70,28 @@ function readLines(doc: mupdf.PDFDocument, index: number): TextLine[] {
 	return out;
 }
 
+/** Values that turn a checkbox or radio button off. */
+const OFF_VALUES = new Set(['Off', 'off', 'false', '']);
+/** Generic "on" values accepted for a single checkbox, whatever its on-state is called. */
+const GENERIC_ON = new Set(['true', 'Yes', 'on']);
+
+/** The name of a button widget's on appearance state, e.g. "Yes", "Sim", "1". */
+function onStateOf(widget: mupdf.PDFWidget): string | null {
+	let on: string | null = null;
+	widget
+		.getObject()
+		.get('AP', 'N')
+		.forEach((_, key) => {
+			if (key !== 'Off') on ??= String(key);
+		});
+	return on;
+}
+
+const isOn = (widget: mupdf.PDFWidget) => {
+	const state = widget.getObject().get('AS');
+	return state.isName() && state.asName() !== 'Off';
+};
+
 export const editJobs = {
 	/** Diagonal or horizontal text stamped across a page selection. */
 	watermark(
@@ -367,6 +389,12 @@ export const editJobs = {
 		value: string;
 		options: string[];
 		readOnly: boolean;
+		/**
+		 * For a checkbox or radio widget, the value that turns THIS widget on
+		 * in fillForm (its on-state, e.g. "Yes", "Sim", "1"); null otherwise.
+		 * A radio group lists one entry per widget, all with the same name.
+		 */
+		exportValue: string | null;
 	}[] {
 		const doc = ctx.get(params.handle);
 		const out = [];
@@ -379,7 +407,8 @@ export const editJobs = {
 					type: widget.getFieldType(),
 					value: widget.getValue(),
 					options: widget.isChoice() ? widget.getOptions() : [],
-					readOnly: widget.isReadOnly()
+					readOnly: widget.isReadOnly(),
+					exportValue: widget.isCheckbox() || widget.isRadioButton() ? onStateOf(widget) : null
 				});
 			}
 		}
@@ -397,29 +426,44 @@ export const editJobs = {
 		}
 	): OutputFile {
 		const doc = ctx.get(params.handle);
-		const remaining = new Set(Object.keys(params.values));
+		const byName = new Map<string, mupdf.PDFWidget[]>();
+		for (const index of allPages(doc))
+			for (const widget of doc.loadPage(index).getWidgets())
+				byName.set(widget.getName(), [...(byName.get(widget.getName()) ?? []), widget]);
 
-		for (const index of allPages(doc)) {
-			for (const widget of doc.loadPage(index).getWidgets()) {
-				const name = widget.getName();
-				if (!(name in params.values)) continue;
-				remaining.delete(name);
-				const value = params.values[name];
+		// Validate everything before writing anything: failing halfway would
+		// leave the open document partly filled.
+		const unknown = Object.keys(params.values).filter((name) => !byName.has(name));
+		if (unknown.length)
+			throw new EngineError(`Este formulário não tem o campo ${unknown.join(', ')}`);
 
-				if (widget.isCheckbox() || widget.isRadioButton()) {
-					const on = value === 'true' || value === 'Yes' || value === 'on';
-					if (on !== (widget.getValue() !== 'Off')) widget.toggle();
-				} else if (widget.isChoice()) {
-					widget.setChoiceValue(value);
-				} else {
-					widget.setTextValue(value);
-				}
-				widget.update();
+		const writes: (() => void)[] = [];
+		for (const [name, value] of Object.entries(params.values)) {
+			const widgets = byName.get(name)!;
+			if (!widgets.every((w) => w.isCheckbox() || w.isRadioButton())) {
+				for (const widget of widgets)
+					writes.push(() => {
+						if (widget.isChoice()) widget.setChoiceValue(value);
+						else widget.setTextValue(value);
+						widget.update();
+					});
+				continue;
 			}
-		}
 
-		if (remaining.size)
-			throw new EngineError(`Este formulário não tem o campo ${[...remaining].join(', ')}`);
+			// A checkbox or radio group: the value names the on-state (export
+			// value) of the widget to turn on. Every other widget goes off.
+			let targets = OFF_VALUES.has(value) ? [] : widgets.filter((w) => onStateOf(w) === value);
+			if (!OFF_VALUES.has(value) && targets.length === 0) {
+				if (widgets.length === 1 && GENERIC_ON.has(value)) targets = widgets;
+				else throw new EngineError(`O campo ${name} não tem a opção "${value}"`);
+			}
+			for (const widget of widgets)
+				writes.push(() => {
+					if (targets.includes(widget) !== isOn(widget)) widget.toggle();
+					widget.update();
+				});
+		}
+		for (const write of writes) write();
 
 		// `bake` turns widgets into ordinary page content, so the values stay
 		// visible in readers that ignore form data.

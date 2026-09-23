@@ -17,6 +17,8 @@ export interface JobContext {
 	store(doc: mupdf.PDFDocument, byteLength: number): DocHandle;
 	/** Look up a previously opened document; throws if the handle is unknown. */
 	get(handle: DocHandle): mupdf.PDFDocument;
+	/** Size in bytes of the file the handle was opened from. */
+	byteLength(handle: DocHandle): number;
 	drop(handle: DocHandle): void;
 	/** Stream a partial result to the UI before the job finishes. */
 	emit(chunk: unknown): void;
@@ -27,10 +29,13 @@ export interface JobContext {
 	checkCancelled(): void;
 }
 
-/** Normalise MuPDF's /Rotate, which may be absent, negative or over 360. */
+/**
+ * Normalise /Rotate, which may be absent, negative, over 360, or inherited
+ * from an ancestor in the page tree rather than set on the page itself.
+ */
 export function pageRotation(page: mupdf.PDFPage): number {
-	const raw = page.getObject().get('Rotate');
-	const deg = raw && !raw.isNull() ? raw.asNumber() : 0;
+	const raw = page.getObject().getInheritable('Rotate');
+	const deg = raw.isNumber() ? raw.asNumber() : 0;
 	return (((Math.round(deg / 90) * 90) % 360) + 360) % 360;
 }
 
@@ -73,11 +78,25 @@ export function toOutput(
 	filename: string,
 	options = SAVE_CLEAN
 ): OutputFile {
-	return { filename, mime: 'application/pdf', bytes: doc.saveToBuffer(options).asUint8Array() };
+	return {
+		filename,
+		mime: 'application/pdf',
+		bytes: doc.saveToBuffer(options).asUint8Array().slice()
+	};
 }
 
 export const allPages = (doc: mupdf.PDFDocument) =>
 	Array.from({ length: doc.countPages() }, (_, i) => i);
+
+/**
+ * An independent copy of `doc` that keeps its whole object graph (outlines,
+ * AcroForm, structure tree, names), so page tools can edit it without
+ * touching the cached original. Grafting pages into a fresh document would
+ * drop everything that hangs off the catalog.
+ */
+export function copyDocument(doc: mupdf.PDFDocument): mupdf.PDFDocument {
+	return new mupdf.PDFDocument(doc.saveToBuffer('encrypt=none'));
+}
 
 /** Resolve an optional page selection to concrete indices, defaulting to all. */
 export function pagesOf(doc: mupdf.PDFDocument, pages?: number[]): number[] {
@@ -116,7 +135,7 @@ export function toPdfDocument(input: mupdf.Document): mupdf.PDFDocument {
 		writer.endPage();
 	}
 	writer.close();
-	const pdf = mupdf.Document.openDocument(buffer.asUint8Array(), 'application/pdf').asPDF();
+	const pdf = mupdf.Document.openDocument(buffer, 'application/pdf').asPDF();
 	if (!pdf) throw new EngineError('Não foi possível gerar um PDF a partir deste documento');
 	return pdf;
 }
@@ -144,7 +163,7 @@ export function rebuild(
 		writer.endPage();
 	}
 	writer.close();
-	const pdf = mupdf.Document.openDocument(buffer.asUint8Array(), 'application/pdf').asPDF();
+	const pdf = mupdf.Document.openDocument(buffer, 'application/pdf').asPDF();
 	if (!pdf) throw new EngineError('Não foi possível reconstruir o documento');
 	return pdf;
 }

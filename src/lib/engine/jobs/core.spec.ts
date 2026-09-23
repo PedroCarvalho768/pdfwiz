@@ -170,7 +170,9 @@ describe('render', () => {
 		const doc = fixture(ctx, ['One', 'Two', 'Three']);
 		cancel();
 
-		await expect(handlers.render(ctx, { handle: doc.handle })).rejects.toThrow(/Cancelled/);
+		await expect(handlers.render(ctx, { handle: doc.handle })).rejects.toThrow(
+			/Operação cancelada/
+		);
 		expect(chunks).toHaveLength(0);
 	});
 });
@@ -180,6 +182,6 @@ describe('handle lifecycle', () => {
 		const { ctx } = testContext();
 		const doc = fixture(ctx, ['One']);
 		handlers.close(ctx, { handle: doc.handle });
-		expect(() => handlers.inspect(ctx, { handle: doc.handle })).toThrow(/Unknown document handle/);
+		expect(() => handlers.inspect(ctx, { handle: doc.handle })).toThrow(/Documento não encontrado/);
 	});
 });

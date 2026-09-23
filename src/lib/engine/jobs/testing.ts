@@ -5,7 +5,7 @@
  * so a broken handler fails its own test instead of every other one.
  */
 import * as mupdf from 'mupdf';
-import { EngineError, type DocHandle } from '../contract';
+import { CANCELLED_MESSAGE, EngineError, UNKNOWN_HANDLE, type DocHandle } from '../contract';
 import type { JobContext } from '../shared';
 import { handlers } from './index';
 
@@ -15,33 +15,44 @@ export function testContext() {
 	const docs = new Map<DocHandle, mupdf.PDFDocument>();
 	const chunks: unknown[] = [];
 	const progress: { done: number; total: number }[] = [];
+	const labels: string[] = [];
+	const sizes = new Map<DocHandle, number>();
 	let cancelled = false;
 	let next = 0;
 
 	const ctx: JobContext = {
-		store(doc) {
+		store(doc, byteLength) {
 			const handle = `doc-${next++}`;
 			docs.set(handle, doc);
+			sizes.set(handle, byteLength);
 			return handle;
 		},
 		get(handle) {
 			const doc = docs.get(handle);
-			if (!doc) throw new EngineError(`Unknown document handle ${handle}`);
+			if (!doc) throw new EngineError(UNKNOWN_HANDLE);
 			return doc;
+		},
+		byteLength(handle) {
+			ctx.get(handle);
+			return sizes.get(handle) ?? 0;
 		},
 		drop(handle) {
 			docs.get(handle)?.destroy();
 			docs.delete(handle);
+			sizes.delete(handle);
 		},
 		emit: (chunk) => void chunks.push(chunk),
-		report: (p) => void progress.push({ done: p.done, total: p.total }),
+		report: (p) => {
+			progress.push({ done: p.done, total: p.total });
+			if (p.label) labels.push(p.label);
+		},
 		yield: async () => {},
 		checkCancelled() {
-			if (cancelled) throw new EngineError('Cancelled', 'CANCELLED');
+			if (cancelled) throw new EngineError(CANCELLED_MESSAGE, 'CANCELLED');
 		}
 	};
 
-	return { ctx, chunks, progress, cancel: () => (cancelled = true) };
+	return { ctx, chunks, progress, labels, cancel: () => (cancelled = true) };
 }
 
 /** A PDF with exactly one page per marker, each carrying findable text. */
@@ -61,7 +72,7 @@ export function multiPagePdf(markers: string[]): Uint8Array {
 		}
 	}
 	writer.close();
-	return buffer.asUint8Array();
+	return buffer.asUint8Array().slice();
 }
 
 export const fixture = (ctx: JobContext, markers: string[]) =>

@@ -52,6 +52,10 @@ export interface RenderedPage {
 /** Thrown by the engine when a document needs a password we do not have. */
 export const PASSWORD_REQUIRED = 'PASSWORD_REQUIRED';
 
+/** User-visible messages shared by the worker, the client and the test harness. */
+export const CANCELLED_MESSAGE = 'Operação cancelada';
+export const UNKNOWN_HANDLE = 'Documento não encontrado. Abra o arquivo novamente.';
+
 // ---------------------------------------------------------------------------
 // Wire protocol
 // ---------------------------------------------------------------------------
