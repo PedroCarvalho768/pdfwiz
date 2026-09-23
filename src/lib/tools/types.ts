@@ -71,7 +71,15 @@ export type Field =
 	 * A page selection like "1-3,7", validated live against the document.
 	 * `required` blocks the run while empty; otherwise empty means every page.
 	 */
-	| { kind: 'pages'; key: string; label: string; help?: string; required?: boolean }
+	| {
+			kind: 'pages';
+			key: string;
+			label: string;
+			help?: string;
+			required?: boolean;
+			/** Also accept the position after the last page ("at the end"). */
+			allowEnd?: boolean;
+	  }
 	/** A second file — a stamp, a logo, a signature image. */
 	| { kind: 'file'; key: string; label: string; accept: string[]; help?: string };
 

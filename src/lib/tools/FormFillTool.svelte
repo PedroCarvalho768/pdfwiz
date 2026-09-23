@@ -42,12 +42,21 @@
 			.finally(() => (loading = false));
 	});
 
-	const editable = $derived(widgets.filter((widget) => !widget.readOnly && widget.name));
-
-	// ponytail: checkbox and radio values are still 'true' / 'Off'. The engine
-	// branch switches to each widget's export value; that mapping lands with
-	// it, together with real radio groups.
-	const isOn = (value: string | undefined) => !!value && value !== 'Off' && value !== 'false';
+	/**
+	 * One entry per field name. Radio widgets share a name and become one
+	 * group; a button's value is the export value of the widget that is on,
+	 * or 'Off', which is exactly what fillForm takes.
+	 */
+	const fields = $derived.by(() => {
+		const groups: Widget[][] = [];
+		const at: Record<string, number> = {};
+		for (const widget of widgets) {
+			if (widget.readOnly || !widget.name) continue;
+			if (!(widget.name in at)) at[widget.name] = groups.push([]) - 1;
+			groups[at[widget.name]].push(widget);
+		}
+		return groups;
+	});
 
 	// A plain object, never the proxy: $state cannot be structured-cloned
 	// into the worker (DataCloneError).
@@ -64,7 +73,7 @@
 				handle: doc.handle,
 				values: changed,
 				flatten,
-				filename: `${baseName(doc.filename)}-filled.pdf`
+				filename: `${baseName(doc.filename)}-preenchido.pdf`
 			})
 		]);
 </script>
@@ -75,7 +84,7 @@
 	<p class="rounded-[var(--radius-control)] bg-danger-soft p-4 text-sm text-danger" role="alert">
 		{loadError}
 	</p>
-{:else if editable.length === 0}
+{:else if fields.length === 0}
 	<p class="rounded-[var(--radius-control)] bg-raised p-4 text-sm text-ink">
 		Este PDF não tem campos preenchíveis. Use
 		<a class="underline" href={resolve('/[tool]', { tool: 'stamp-image-pdf' })}
@@ -88,17 +97,39 @@
 	</p>
 {:else}
 	<div class="space-y-4">
-		<!-- Keyed by more than the name: radio widgets share one. -->
-		{#each editable as field, index (`${field.name}-${field.page}-${index}`)}
+		{#each fields as group, index (group[0].name)}
+			{@const field = group[0]}
 			{@const id = `campo-${index}`}
 			{@const label = field.label || field.name}
-			{#if field.type === 'checkbox' || field.type === 'radiobutton'}
+			{#if field.type === 'radiobutton'}
+				<fieldset>
+					<legend class="text-sm font-medium text-ink">
+						{label}
+						<span class="ml-1 text-xs font-normal text-muted">página {field.page + 1}</span>
+					</legend>
+					<div class="mt-1 flex flex-wrap gap-x-5 gap-y-2">
+						{#each [...new Set( [...group.map((w) => w.exportValue ?? ''), 'Off'] )] as option (option)}
+							<label class="flex items-center gap-2 text-sm text-ink">
+								<input
+									type="radio"
+									name={id}
+									class="border-line text-accent focus:ring-accent"
+									checked={(values[field.name] || 'Off') === option}
+									onchange={() => (values[field.name] = option)}
+								/>
+								{option === 'Off' ? 'Nenhuma' : option}
+							</label>
+						{/each}
+					</div>
+				</fieldset>
+			{:else if field.type === 'checkbox'}
 				<label class="flex items-center gap-3">
 					<input
 						type="checkbox"
 						class="rounded border-line text-accent focus:ring-accent"
-						checked={isOn(values[field.name])}
-						onchange={(e) => (values[field.name] = e.currentTarget.checked ? 'true' : 'Off')}
+						checked={(values[field.name] || 'Off') !== 'Off'}
+						onchange={(e) =>
+							(values[field.name] = e.currentTarget.checked ? (field.exportValue ?? 'Yes') : 'Off')}
 					/>
 					<span class="text-sm font-medium text-ink">
 						{label}

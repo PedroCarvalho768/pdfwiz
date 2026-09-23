@@ -76,7 +76,7 @@
 					text,
 					size: line.size
 				})),
-				filename: `${baseName(doc.filename)}-edited.pdf`
+				filename: `${baseName(doc.filename)}-editado.pdf`
 			});
 			return {
 				files: [file],

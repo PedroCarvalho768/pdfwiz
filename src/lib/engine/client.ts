@@ -18,6 +18,11 @@ export interface RunOptions<Chunk> {
 	onChunk?: (chunk: Chunk) => void;
 	onProgress?: (progress: Progress) => void;
 	signal?: AbortSignal;
+	/**
+	 * Buffers to move into the worker instead of copying. They are detached
+	 * here afterwards, so pass only bytes the caller no longer reads.
+	 */
+	transfer?: Transferable[];
 }
 
 export class EngineFailure extends Error {
@@ -125,7 +130,10 @@ export function run<N extends JobName>(
 		signal?.addEventListener('abort', onAbort, { once: true });
 
 		try {
-			target.postMessage({ kind: 'job', id, name, params } satisfies WorkerIn);
+			target.postMessage(
+				{ kind: 'job', id, name, params } satisfies WorkerIn,
+				options.transfer ?? []
+			);
 		} catch (err) {
 			// Almost always a Svelte $state proxy: reactive objects cannot be
 			// structured-cloned. Hold worker results in $state.raw and pass
@@ -196,5 +204,6 @@ export function magicFor(file: File): string {
 /** Read a File and open it in the engine. */
 export async function openFile(file: File, password?: string): Promise<DocInfo> {
 	const bytes = new Uint8Array(await file.arrayBuffer());
-	return run('open', { bytes, magic: magicFor(file), password });
+	// A large scan would otherwise exist twice in memory, once on each side.
+	return run('open', { bytes, magic: magicFor(file), password }, { transfer: [bytes.buffer] });
 }

@@ -65,7 +65,7 @@ const bool = (ctx: ToolRunContext, key: string) => Boolean(ctx.values[key]);
  */
 async function withExtra<T>(file: File, use: (handle: string) => Promise<T>): Promise<T> {
 	const bytes = new Uint8Array(await file.arrayBuffer());
-	const info = await run('open', { bytes, magic: magicFor(file) });
+	const info = await run('open', { bytes, magic: magicFor(file) }, { transfer: [bytes.buffer] });
 	try {
 		return await use(info.handle);
 	} finally {
@@ -175,7 +175,7 @@ export const tools: Tool[] = [
 				handle: ctx.docs[0].handle,
 				degrees: num(ctx, 'degrees'),
 				pages: ctx.pages('pages'),
-				filename: `${ctx.stem}-rotated.pdf`
+				filename: `${ctx.stem}-girado.pdf`
 			})
 		]
 	},
@@ -199,7 +199,7 @@ export const tools: Tool[] = [
 		execute: async (ctx) =>
 			run('extract', {
 				handle: ctx.docs[0].handle,
-				selections: [{ pages: ctx.pages('pages')!, filename: `${ctx.stem}-extracted.pdf` }]
+				selections: [{ pages: ctx.pages('pages')!, filename: `${ctx.stem}-extraído.pdf` }]
 			})
 	},
 	{
@@ -225,7 +225,7 @@ export const tools: Tool[] = [
 			if (keep.length === 0) throw new Error('Isso apagaria todas as páginas');
 			return run('extract', {
 				handle: ctx.docs[0].handle,
-				selections: [{ pages: keep, filename: `${ctx.stem}-trimmed.pdf` }]
+				selections: [{ pages: keep, filename: `${ctx.stem}-aparado.pdf` }]
 			});
 		}
 	},
@@ -238,7 +238,7 @@ export const tools: Tool[] = [
 		accept: READABLE,
 		keywords: ['inverter', 'ordem'],
 		execute: async (ctx) => [
-			await run('reverse', { handle: ctx.docs[0].handle, filename: `${ctx.stem}-reversed.pdf` })
+			await run('reverse', { handle: ctx.docs[0].handle, filename: `${ctx.stem}-invertido.pdf` })
 		]
 	},
 	{
@@ -258,7 +258,7 @@ export const tools: Tool[] = [
 				handle: ctx.docs[0].handle,
 				times: num(ctx, 'times'),
 				pages: ctx.pages('pages'),
-				filename: `${ctx.stem}-copies.pdf`
+				filename: `${ctx.stem}-repetido.pdf`
 			})
 		]
 	},
@@ -285,7 +285,7 @@ export const tools: Tool[] = [
 				bottom: num(ctx, 'bottom'),
 				left: num(ctx, 'left'),
 				pages: ctx.pages('pages'),
-				filename: `${ctx.stem}-cropped.pdf`
+				filename: `${ctx.stem}-recortado.pdf`
 			})
 		]
 	},
@@ -312,7 +312,7 @@ export const tools: Tool[] = [
 				handle: ctx.docs[0].handle,
 				size: str(ctx, 'size'),
 				landscape: bool(ctx, 'landscape'),
-				filename: `${ctx.stem}-resized.pdf`
+				filename: `${ctx.stem}-redimensionado.pdf`
 			})
 		]
 	},
@@ -352,7 +352,7 @@ export const tools: Tool[] = [
 				size: str(ctx, 'size'),
 				landscape: bool(ctx, 'landscape'),
 				gap: num(ctx, 'gap'),
-				filename: `${ctx.stem}-nup.pdf`
+				filename: `${ctx.stem}-n-por-folha.pdf`
 			})
 		]
 	},
@@ -377,7 +377,7 @@ export const tools: Tool[] = [
 			await run('booklet', {
 				handle: ctx.docs[0].handle,
 				size: str(ctx, 'size'),
-				filename: `${ctx.stem}-booklet.pdf`
+				filename: `${ctx.stem}-livreto.pdf`
 			})
 		]
 	},
@@ -403,7 +403,7 @@ export const tools: Tool[] = [
 				await run('interleave', {
 					handles: [ctx.docs[0].handle, ctx.docs[1].handle],
 					reverseSecond: bool(ctx, 'reverseSecond'),
-					filename: `${ctx.stem}-interleaved.pdf`
+					filename: `${ctx.stem}-intercalado.pdf`
 				})
 			];
 		}
@@ -428,7 +428,7 @@ export const tools: Tool[] = [
 					handle: ctx.docs[0].handle,
 					stampHandle,
 					behind: bool(ctx, 'behind'),
-					filename: `${ctx.stem}-overlaid.pdf`
+					filename: `${ctx.stem}-sobreposto.pdf`
 				})
 			]);
 		}
@@ -446,14 +446,16 @@ export const tools: Tool[] = [
 				kind: 'pages',
 				key: 'at',
 				label: 'Inserir antes destas páginas',
-				help: 'Por exemplo, 1,4 insere uma página em branco antes das páginas 1 e 4.'
+				help: 'Por exemplo, 1,4 insere uma página em branco antes das páginas 1 e 4. Use o número seguinte ao da última página para inserir no final.',
+				required: true,
+				allowEnd: true
 			}
 		],
 		execute: async (ctx) => [
 			await run('insertBlank', {
 				handle: ctx.docs[0].handle,
-				at: ctx.pages('at') ?? [0],
-				filename: `${ctx.stem}-with-blanks.pdf`
+				at: ctx.pages('at') ?? [],
+				filename: `${ctx.stem}-com-brancos.pdf`
 			})
 		]
 	},
@@ -503,7 +505,7 @@ export const tools: Tool[] = [
 				rotate: num(ctx, 'rotate'),
 				font: str(ctx, 'font') as never,
 				pages: ctx.pages('pages'),
-				filename: `${ctx.stem}-watermarked.pdf`
+				filename: `${ctx.stem}-marca-dagua.pdf`
 			})
 		]
 	},
@@ -548,7 +550,7 @@ export const tools: Tool[] = [
 				font: str(ctx, 'font') as never,
 				margin: num(ctx, 'margin'),
 				pages: ctx.pages('pages'),
-				filename: `${ctx.stem}-numbered.pdf`
+				filename: `${ctx.stem}-numerado.pdf`
 			})
 		]
 	},
@@ -585,7 +587,7 @@ export const tools: Tool[] = [
 				font: str(ctx, 'font') as never,
 				margin: num(ctx, 'margin'),
 				pages: ctx.pages('pages'),
-				filename: `${ctx.stem}-header.pdf`
+				filename: `${ctx.stem}-cabeçalho.pdf`
 			})
 		]
 	},
@@ -638,7 +640,7 @@ export const tools: Tool[] = [
 							opacity: num(ctx, 'opacity') / 100
 						}
 					],
-					filename: `${ctx.stem}-stamped.pdf`
+					filename: `${ctx.stem}-carimbado.pdf`
 				})
 			];
 		}
@@ -670,7 +672,7 @@ export const tools: Tool[] = [
 				handle: ctx.docs[0].handle,
 				annotations: bool(ctx, 'annotations'),
 				forms: bool(ctx, 'forms'),
-				filename: `${ctx.stem}-flattened.pdf`
+				filename: `${ctx.stem}-achatado.pdf`
 			})
 		]
 	},
@@ -1010,7 +1012,7 @@ export const tools: Tool[] = [
 				kind: 'password',
 				key: 'ownerPassword',
 				label: 'Senha de proprietário',
-				help: 'Necessária para alterar as restrições abaixo.'
+				help: 'Quem tem esta senha pode tirar as restrições abaixo. Se ficar em branco, uma senha aleatória é gerada e ninguém consegue tirá-las depois.'
 			},
 			{
 				kind: 'select',
@@ -1051,7 +1053,7 @@ export const tools: Tool[] = [
 					assemble: bool(ctx, 'modify'),
 					printHighQuality: bool(ctx, 'print')
 				},
-				filename: `${ctx.stem}-protected.pdf`
+				filename: `${ctx.stem}-protegido.pdf`
 			})
 		]
 	},
@@ -1065,57 +1067,19 @@ export const tools: Tool[] = [
 		keywords: ['tirar senha', 'remover senha', 'desbloquear', 'descriptografar'],
 		note: 'Você precisa saber a senha: ela é pedida ao abrir o arquivo. Esta ferramenta não quebra criptografia.',
 		execute: async (ctx) => [
-			await run('unlock', { handle: ctx.docs[0].handle, filename: `${ctx.stem}-unlocked.pdf` })
+			await run('unlock', { handle: ctx.docs[0].handle, filename: `${ctx.stem}-sem-senha.pdf` })
 		]
 	},
 	{
 		id: 'redact-pdf',
 		title: 'Tarjar texto',
-		blurb: 'Apague de vez todas as ocorrencias de uma palavra ou frase.',
+		blurb: 'Encontre um nome, CPF ou conta, confira cada ocorrência e apague de vez.',
 		group: 'Segurança',
 		input: 'single',
 		accept: READABLE,
-		keywords: ['censurar', 'tarjar', 'ocultar', 'redigir'],
-		note: 'O texto e apagado de verdade, não apenas coberto. Ele não pode ser recuperado nem copiado do resultado.',
-		fields: [
-			{
-				kind: 'text',
-				key: 'needle',
-				label: 'Texto a remover',
-				placeholder: 'um nome ou número de conta, por exemplo'
-			},
-			{
-				kind: 'checkbox',
-				key: 'blackBoxes',
-				label: 'Desenhar tarjas pretas nos vazios',
-				default: true
-			},
-			{ kind: 'checkbox', key: 'removeImages', label: 'Remover também as imagens atingidas' },
-			pagesField()
-		],
-		execute: async (ctx) => {
-			const needle = str(ctx, 'needle').trim();
-			if (!needle) throw new Error('Digite o texto que você quer remover');
-
-			const hits = await run('search', {
-				handle: ctx.docs[0].handle,
-				needle,
-				pages: ctx.pages('pages')
-			});
-			if (hits.length === 0) throw new Error(`"${needle}" não aparece neste documento`);
-
-			const file = await run('redact', {
-				handle: ctx.docs[0].handle,
-				areas: hits.map((hit) => ({ page: hit.page, rect: hit.rect })),
-				blackBoxes: bool(ctx, 'blackBoxes'),
-				removeImages: bool(ctx, 'removeImages'),
-				filename: `${ctx.stem}-redacted.pdf`
-			});
-			return {
-				files: [file],
-				summary: `${hits.length} ocorrência${hits.length === 1 ? '' : 's'} de "${needle}" remov${hits.length === 1 ? 'ida' : 'idas'}.`
-			};
-		}
+		keywords: ['censurar', 'tarjar', 'ocultar', 'redigir', 'cpf', 'anonimizar'],
+		note: 'O texto é apagado de verdade, não apenas coberto: não pode ser recuperado nem copiado do resultado. Por isso nada é tarjado sem você conferir a lista antes.',
+		component: () => import('./RedactTool.svelte')
 	},
 	{
 		id: 'sanitize-pdf',
@@ -1148,7 +1112,7 @@ export const tools: Tool[] = [
 				attachments: bool(ctx, 'attachments'),
 				metadata: bool(ctx, 'metadata'),
 				links: bool(ctx, 'links'),
-				filename: `${ctx.stem}-sanitized.pdf`
+				filename: `${ctx.stem}-limpo.pdf`
 			})
 		]
 	},
@@ -1163,7 +1127,7 @@ export const tools: Tool[] = [
 		execute: async (ctx) => {
 			const result = await run('repair', {
 				handle: ctx.docs[0].handle,
-				filename: `${ctx.stem}-repaired.pdf`
+				filename: `${ctx.stem}-reparado.pdf`
 			});
 			return {
 				files: [result.file],
@@ -1187,7 +1151,7 @@ export const tools: Tool[] = [
 			await run('corrupt', {
 				handle: ctx.docs[0].handle,
 				strength: num(ctx, 'strength'),
-				filename: `${ctx.stem}-corrupted.pdf`
+				filename: `${ctx.stem}-corrompido.pdf`
 			})
 		]
 	},
@@ -1218,12 +1182,16 @@ export const tools: Tool[] = [
 			const result = await run('compress', {
 				handle: ctx.docs[0].handle,
 				level: str(ctx, 'level') as never,
-				filename: `${ctx.stem}-compressed.pdf`
+				filename: `${ctx.stem}-comprimido.pdf`
 			});
 			return {
 				files: [result.file],
 				summary: `${percent(result.before, result.after)}${
 					result.imagesRecompressed ? `, ${result.imagesRecompressed} imagens recodificadas` : ''
+				}${
+					result.imagesSkipped
+						? `, ${plural(result.imagesSkipped, 'imagem ficou', 'imagens ficaram')} sem alteração (formato não suportado)`
+						: ''
 				}`
 			};
 		}
@@ -1245,7 +1213,7 @@ export const tools: Tool[] = [
 			await run('grayscale', {
 				handle: ctx.docs[0].handle,
 				dpi: num(ctx, 'dpi'),
-				filename: `${ctx.stem}-grayscale.pdf`
+				filename: `${ctx.stem}-cinza.pdf`
 			})
 		]
 	},
@@ -1266,7 +1234,7 @@ export const tools: Tool[] = [
 			await run('rasterize', {
 				handle: ctx.docs[0].handle,
 				dpi: num(ctx, 'dpi'),
-				filename: `${ctx.stem}-flat.pdf`
+				filename: `${ctx.stem}-em-imagens.pdf`
 			})
 		]
 	},
@@ -1281,7 +1249,7 @@ export const tools: Tool[] = [
 		execute: async (ctx) => {
 			const result = await run('clean', {
 				handle: ctx.docs[0].handle,
-				filename: `${ctx.stem}-clean.pdf`
+				filename: `${ctx.stem}-enxuto.pdf`
 			});
 			return { files: [result.file], summary: percent(result.before, result.after) };
 		}
@@ -1389,7 +1357,7 @@ export const tools: Tool[] = [
 			return {
 				files: [
 					{
-						filename: `${ctx.stem}-report.json`,
+						filename: `${ctx.stem}-relatório.json`,
 						mime: 'application/json',
 						bytes: new TextEncoder().encode(JSON.stringify(report, null, 2))
 					}
@@ -1418,7 +1386,7 @@ export const tools: Tool[] = [
 			return {
 				files: [
 					{
-						filename: `${ctx.stem}-bookmarks.txt`,
+						filename: `${ctx.stem}-marcadores.txt`,
 						mime: 'text/plain',
 						bytes: new TextEncoder().encode(text)
 					}

@@ -49,7 +49,7 @@
 			const raw = String(values[field.key] ?? '').trim();
 			if (!raw) continue;
 			try {
-				parsePageRange(raw, pageCount);
+				parsePageRange(raw, pageCount, { allowEnd: field.allowEnd });
 			} catch (err) {
 				out[field.key] = (err as Error).message;
 			}
@@ -84,7 +84,9 @@
 				stem: baseName(docs[0]?.filename || sources[0]?.name || 'documento'),
 				pages: (key) => {
 					const raw = String(values[key] ?? '').trim();
-					return raw ? parsePageRange(raw, pageCount) : undefined;
+					const field = tool.fields?.find((f) => f.key === key);
+					const allowEnd = field?.kind === 'pages' && field.allowEnd;
+					return raw ? parsePageRange(raw, pageCount, { allowEnd }) : undefined;
 				}
 			});
 		});

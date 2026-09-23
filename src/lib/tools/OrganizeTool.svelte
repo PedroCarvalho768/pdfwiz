@@ -26,7 +26,7 @@
 				handle: doc.handle,
 				order: pages.map((page) => page.source),
 				rotations: pages.map((page) => page.rotation),
-				filename: `${baseName(doc.filename)}-organized.pdf`
+				filename: `${baseName(doc.filename)}-organizado.pdf`
 			})
 		]);
 </script>

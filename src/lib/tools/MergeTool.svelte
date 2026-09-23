@@ -27,7 +27,7 @@
 	const pagesLabel = (n: number) => `${n} ${n === 1 ? 'página' : 'páginas'}`;
 
 	const merge = () =>
-		run(async () => [await runJob('merge', { handles: order, filename: 'merged.pdf' })]);
+		run(async () => [await runJob('merge', { handles: order, filename: 'juntado.pdf' })]);
 
 	const buttonClass =
 		'inline-flex size-9 items-center justify-center rounded text-muted hover:bg-raised disabled:opacity-30';

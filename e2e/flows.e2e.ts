@@ -47,23 +47,29 @@ test('a form fills, saves only what changed, and reads back', async ({ page }) =
 	await expect(name).toBeVisible({ timeout: 30_000 });
 	await name.fill('Maria Silva');
 	await page.getByRole('checkbox', { name: /Concordo/ }).check();
+	// A radio group renders as one group of options, not a checkbox per widget.
+	await expect(page.getByRole('group', { name: /Plano/ }).getByRole('radio')).toHaveCount(3);
+	await page.getByRole('radio', { name: 'Pro' }).check();
 
 	await page.getByRole('button', { name: 'Salvar formulário preenchido' }).click();
 	const result = await grabDownload(page, () => downloadButton(page).click());
-	expect(result.name).toBe('form-filled.pdf');
-	expect(widgetValues(result.bytes)).toEqual({ fullname: 'Maria Silva', agree: 'Yes' });
+	expect(result.name).toBe('form-preenchido.pdf');
+	expect(widgetValues(result.bytes)).toEqual({
+		fullname: 'Maria Silva',
+		agree: 'Sim',
+		plano: 'Pro'
+	});
 });
 
-// Holds under both the old (output position) and the new (source page)
-// insertBlank semantics. "Also at the end" arrives with the engine change.
-test('inserts a blank page before the chosen page', async ({ page }) => {
+test('inserts blank pages before the chosen source pages and at the end', async ({ page }) => {
 	await page.goto('/insert-blank-pages');
-	await page.setInputFiles('input[type=file]', fixturePdf('two.pdf', ['One', 'Two']));
+	await page.setInputFiles('input[type=file]', fixturePdf('three.pdf', ['One', 'Two', 'Three']));
 
-	await page.getByLabel('Inserir antes destas páginas').fill('2');
+	// "3" is a source page, not an output position; "4" means after the last.
+	await page.getByLabel('Inserir antes destas páginas').fill('1,3,4');
 	await page.getByRole('button', { name: 'Inserir páginas em branco' }).click();
 	const result = await grabDownload(page, () => downloadButton(page).click());
-	expect(pageTexts(result.bytes)).toEqual(['One', '', 'Two']);
+	expect(pageTexts(result.bytes)).toEqual(['', 'One', 'Two', '', 'Three', '']);
 });
 
 test('navigating to another tool starts it clean', async ({ page }) => {

@@ -65,7 +65,11 @@
 			// Warm the engine first, so the measurement below reports the cost
 			// of processing rather than the one-off cost of fetching the WASM.
 			const bytes = new Uint8Array(await file.arrayBuffer());
-			const info = await run('open', { bytes, magic: magicFor(file) });
+			const info = await run(
+				'open',
+				{ bytes, magic: magicFor(file) },
+				{ transfer: [bytes.buffer] }
+			);
 			handle = info.handle;
 
 			observer.observe({ type: 'resource' });
