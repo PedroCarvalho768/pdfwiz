@@ -14,8 +14,10 @@
 	 * (scripts/make-sample.mjs), so the hero carries a real document rather
 	 * than an illustration of one.
 	 */
+	import { onDestroy } from 'svelte';
 	import { magicFor, run } from '$lib/engine/client';
 	import { formatBytes } from '$lib/download';
+	import { release } from '$lib/tools/release';
 	import type { RenderedPage } from '$lib/engine/contract';
 
 	const SAMPLE = ['/sample/page-1.png', '/sample/page-2.png', '/sample/page-3.png'];
@@ -26,6 +28,8 @@
 		pages: number;
 		ms: number;
 		requests: number;
+		/** Bytes over the network (transferSize) during processing. */
+		transferred: number;
 	}
 
 	let thumbs = $state.raw<string[]>([]);
@@ -33,21 +37,38 @@
 	let busy = $state(false);
 	let error = $state('');
 	let input: HTMLInputElement;
+	/** Object URLs behind the current thumbnails; revoked when replaced. */
+	let urls: string[] = [];
+
+	function revokeThumbs() {
+		urls.forEach(URL.revokeObjectURL);
+		urls = [];
+		thumbs = [];
+	}
+
+	onDestroy(revokeThumbs);
 
 	const shown = $derived(thumbs.length ? thumbs : SAMPLE);
 
 	async function handle(file: File) {
 		error = '';
 		busy = true;
-		const urls: string[] = [];
+		revokeThumbs();
+		let handle: string | undefined;
+		// An observer, not a before/after count of getEntriesByType: the
+		// resource timing buffer holds 250 entries by default, and once it is
+		// full the count stops moving and would report a false zero.
+		const seen: PerformanceEntry[] = [];
+		const observer = new PerformanceObserver((list) => seen.push(...list.getEntries()));
 
 		try {
 			// Warm the engine first, so the measurement below reports the cost
 			// of processing rather than the one-off cost of fetching the WASM.
 			const bytes = new Uint8Array(await file.arrayBuffer());
 			const info = await run('open', { bytes, magic: magicFor(file) });
+			handle = info.handle;
 
-			const before = performance.getEntriesByType('resource').length;
+			observer.observe({ type: 'resource' });
 			const start = performance.now();
 
 			await run(
@@ -63,27 +84,33 @@
 			);
 
 			const ms = Math.round(performance.now() - start);
-			const requests = performance.getEntriesByType('resource').length - before;
+			seen.push(...observer.takeRecords());
+			const transferred = seen.reduce(
+				(sum, entry) => sum + ((entry as PerformanceResourceTiming).transferSize ?? 0),
+				0
+			);
 
 			measured = {
 				name: file.name,
 				bytes: file.size,
 				pages: info.pageCount,
 				ms,
-				requests
+				requests: seen.length,
+				transferred
 			};
-			await run('close', { handle: info.handle });
 		} catch (err) {
 			error = (err as Error).message;
-			thumbs = [];
+			revokeThumbs();
 			measured = null;
 		} finally {
+			observer.disconnect();
+			if (handle) release(handle);
 			busy = false;
 		}
 	}
 
 	function reset() {
-		thumbs = [];
+		revokeThumbs();
 		measured = null;
 		error = '';
 	}
@@ -132,8 +159,10 @@
 			     just happened. -->
 			<dl class="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
 				<div>
-					<dt class="text-xs text-panel-muted">Enviado</dt>
-					<dd class="tabular mt-0.5 text-lg text-panel-accent">0 bytes</dd>
+					<dt class="text-xs text-panel-muted">Tráfego de rede</dt>
+					<dd class="tabular mt-0.5 text-lg text-panel-accent">
+						{formatBytes(measured.transferred)}
+					</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-panel-muted">Requisições de rede</dt>
@@ -150,7 +179,10 @@
 			</dl>
 
 			<p class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-panel-muted">
-				<span class="truncate">{measured.name}, {measured.pages} páginas.</span>
+				<span class="truncate"
+					>{measured.name}, {measured.pages}
+					{measured.pages === 1 ? 'página' : 'páginas'}.</span
+				>
 				<button
 					type="button"
 					class="font-medium text-panel-ink underline underline-offset-4 hover:text-panel-accent"

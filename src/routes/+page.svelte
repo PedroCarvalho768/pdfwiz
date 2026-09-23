@@ -2,6 +2,11 @@
 	import { resolve } from '$app/paths';
 	import LocalProof from '$lib/ui/LocalProof.svelte';
 	import { groups, inGroup, searchTools, tools } from '$lib/tools/registry';
+	import { SITE_URL, SOURCE_URL } from '$lib/ui/site';
+
+	const title = `Aegis, ${tools.length} ferramentas de PDF que não sobem seu arquivo`;
+	const description =
+		'Junte, divida, edite, converta, comprima, assine, tarje e tire a senha de PDFs de graça. Cada arquivo é processado no seu próprio dispositivo. Nada é enviado.';
 
 	let query = $state('');
 	const matches = $derived(searchTools(query));
@@ -9,11 +14,13 @@
 </script>
 
 <svelte:head>
-	<title>PDFWiz, {tools.length} ferramentas de PDF que não sobem seu arquivo</title>
-	<meta
-		name="description"
-		content="Junte, divida, edite, converta, comprima, assine, tarje e tire a senha de PDFs de graça. Cada arquivo é processado no seu próprio dispositivo. Nada é enviado."
-	/>
+	<title>{title}</title>
+	<meta name="description" content={description} />
+	<link rel="canonical" href="{SITE_URL}/" />
+	<meta property="og:type" content="website" />
+	<meta property="og:title" content={title} />
+	<meta property="og:description" content={description} />
+	<meta property="og:url" content="{SITE_URL}/" />
 </svelte:head>
 
 <!-- Hero. One asymmetric split: the claim on the left, the proof of it on
@@ -24,8 +31,8 @@
 	<div>
 		<h1 class="display text-[clamp(2.5rem,5.4vw,4.25rem)]">Seu PDF não sai desta aba.</h1>
 		<p class="mt-6 max-w-[46ch] text-lg text-muted">
-			{tools.length} ferramentas que rodam dentro do seu navegador. Sem upload, sem conta, sem servidor
-			que possa guardar uma cópia.
+			{tools.length} ferramentas que rodam dentro do seu navegador. Sem envio de arquivos, sem conta,
+			sem servidor que possa guardar uma cópia.
 		</p>
 		<div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
 			<a
@@ -34,12 +41,14 @@
 			>
 				Achar uma ferramenta
 			</a>
+			<!-- eslint-disable svelte/no-navigation-without-resolve -->
 			<a
-				href="https://github.com/PedroCarvalho768/pdfwiz"
+				href={SOURCE_URL}
 				class="text-sm font-medium text-ink underline decoration-line underline-offset-4 hover:decoration-accent"
 			>
 				Ver o código
 			</a>
+			<!-- eslint-enable svelte/no-navigation-without-resolve -->
 		</div>
 	</div>
 
@@ -60,7 +69,7 @@
 				de que ela será apagada depois.
 			</p>
 			<p class="max-w-[62ch]">
-				O PDFWiz não tem servidor nenhum para onde mandar. O motor inteiro, um build de
+				O Aegis não tem servidor nenhum para onde mandar. O motor inteiro, um build de
 				<span class="font-medium text-ink">3,6 MB</span> do
 				<a
 					class="text-ink underline decoration-line underline-offset-4 hover:decoration-accent"

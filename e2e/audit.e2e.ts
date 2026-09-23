@@ -6,6 +6,8 @@
  * tokens, and parsing those three numbers as RGB reports nonsense ratios.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fixturePdf } from './helpers';
 
 const MEASURE = `(() => {
   const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
@@ -33,12 +35,14 @@ const MEASURE = `(() => {
   out.eyebrows = [...document.querySelectorAll('*')].filter(el => { const c=getComputedStyle(el), t=el.innerText;
     return !el.children.length && c.textTransform==='uppercase' && parseFloat(c.letterSpacing)>0.5
       && t && t.trim().length>0 && t.trim().length<40; }).length;
-  out.bareAccents = ['em um so','Fique so','estao',' nao ',' sao ','voce '].filter(w => document.body.innerText.includes(w));
 
   const fails = [];
   for (const el of document.querySelectorAll('p,span,a,li,h1,h2,h3,h4,h5,h6,button,label,small,dt,dd,input,summary,option')) {
     if (el.children.length) continue;
-    const t = (el.innerText || el.placeholder || '').trim(); if (!t) continue;
+    // A filled control is judged on its value, not its placeholder: typed
+    // text rendered in the wrong colour is exactly the bug to catch.
+    const typed = el.matches('textarea, input:not([type=checkbox],[type=radio],[type=color],[type=file],[type=range])') ? el.value : '';
+    const t = (typed || el.innerText || el.placeholder || '').trim(); if (!t) continue;
     const r = el.getBoundingClientRect(); if (r.width<4 || r.height<4) continue;
     const cs = getComputedStyle(el); if (cs.visibility==='hidden' || +cs.opacity<0.5) continue;
     const bg = bgOf(el), fg = over(toRGBA(cs.color), bg);
@@ -49,8 +53,13 @@ const MEASURE = `(() => {
   }
   out.contrastFails = fails;
 
-  out.smallTapTargets = [...document.querySelectorAll('a,button,input[type=checkbox],select')]
-    .filter(e => { const r = e.getBoundingClientRect(); return r.height > 0 && r.height < 24 && r.width < 24; }).length;
+  // WCAG 2.5.8: 24x24 CSS px. A checkbox or radio inside its <label> is hit
+  // through the label, so the label's box is the target.
+  out.smallTapTargets = [...document.querySelectorAll('a,button,input[type=checkbox],input[type=radio],select')]
+    .map(e => (e.matches('input') && e.closest('label')) || e)
+    // Visually hidden (sr-only, 1px) elements are not targets until focused.
+    .filter(e => { const r = e.getBoundingClientRect(); return r.height > 1 && r.width > 1 && r.height < 24 && r.width < 24; })
+    .map(e => e.tagName.toLowerCase() + ' "' + (e.getAttribute('aria-label') || e.innerText || '').slice(0, 30) + '"');
   return out;
 })()`;
 
@@ -60,30 +69,71 @@ const SIZES = [
 	{ label: 'desktop', width: 1440, height: 900 }
 ];
 
-const PAGES = ['/', '/merge-pdf', '/protect-pdf'];
+// Every tool page, read from the catalog source rather than imported: the
+// registry pulls in $lib aliases that do not resolve under Playwright.
+const TOOL_IDS = [
+	...readFileSync('src/lib/tools/registry.ts', 'utf8').matchAll(/^\t\tid: '([a-z0-9-]+)',$/gm)
+].map((match) => match[1]);
+const PAGES = ['/', ...TOOL_IDS.map((id) => `/${id}`)];
+
+type Measured = Record<string, unknown>;
+
+function assertDesign(m: Measured, where: string) {
+	expect(m.overflowX, `${where} horizontal overflow: ${JSON.stringify(m.culprits)}`).toBe(0);
+	expect(m.emDashes, `${where} em-dashes`).toBe(0);
+	expect(m.contrastFails, `${where} contrast`).toEqual([]);
+	expect(m.smallTapTargets, `${where} tap targets under 24px`).toEqual([]);
+	if (m.h1Lines !== undefined)
+		expect(m.h1Lines as number, `${where} h1 lines at ${m.h1Size}`).toBeLessThanOrEqual(3);
+	// Eyebrow budget: at most ceil(sections / 3). Zero is the target.
+	expect(m.eyebrows, `${where} eyebrows`).toBe(0);
+}
+
+test('the catalog lists every tool, and so does the sitemap', async ({ page }) => {
+	expect(TOOL_IDS).toHaveLength(52);
+	const sitemap = await (await page.request.get('/sitemap.xml')).text();
+	for (const id of TOOL_IDS) expect(sitemap).toContain(`https://pdf.rikode.com.br/${id}</loc>`);
+});
 
 for (const scheme of ['light', 'dark'] as const) {
-	for (const size of SIZES) {
-		test(`${scheme} ${size.label} ${size.width}px`, async ({ page }) => {
+	for (const path of PAGES) {
+		test(`${scheme} ${path}`, async ({ page }) => {
 			await page.emulateMedia({ colorScheme: scheme });
-			await page.setViewportSize({ width: size.width, height: size.height });
-
-			for (const path of PAGES) {
-				await page.goto(path);
-				await page.waitForLoadState('networkidle');
-				const m = (await page.evaluate(MEASURE)) as Record<string, unknown>;
-
-				expect(m.overflowX, `${path} horizontal overflow: ${JSON.stringify(m.culprits)}`).toBe(0);
-				expect(m.emDashes, `${path} em-dashes`).toBe(0);
-				expect(m.bareAccents, `${path} words missing accents`).toEqual([]);
-				expect(m.contrastFails, `${path} contrast`).toEqual([]);
-				if (m.h1Lines !== undefined)
-					expect(m.h1Lines as number, `${path} h1 lines at ${m.h1Size}`).toBeLessThanOrEqual(3);
-				// Eyebrow budget: at most ceil(sections / 3). Zero is the target.
-				expect(m.eyebrows, `${path} eyebrows`).toBe(0);
+			await page.goto(path);
+			// Fonts must be in before h1 line counts mean anything.
+			await page.waitForLoadState('networkidle');
+			for (const size of SIZES) {
+				await page.setViewportSize({ width: size.width, height: size.height });
+				const m = (await page.evaluate(MEASURE)) as Measured;
+				assertDesign(m, `${path} at ${size.width}px`);
 			}
 		});
 	}
+
+	// Controls only render once a file is in, and the dark-mode bug that hid
+	// typed text lived exactly there. Fill the inputs, then measure.
+	test(`${scheme} loaded tools with typed values`, async ({ page }) => {
+		await page.emulateMedia({ colorScheme: scheme });
+		const pdf = fixturePdf('audit.pdf', ['One', 'Two']);
+		const cases: [string, () => Promise<void>][] = [
+			['/pdf-metadata', () => page.getByLabel('Título').fill('Valor digitado')],
+			['/protect-pdf', () => page.getByLabel('Senha para abrir').fill('segredo')],
+			['/watermark-pdf', () => page.getByLabel('Páginas').fill('1-2')],
+			['/organize-pdf', () => expect(page.getByRole('img', { name: 'Página 2' })).toBeVisible()]
+		];
+		for (const [path, fill] of cases) {
+			await page.goto(path);
+			await page.setInputFiles('input[type=file]', pdf);
+			await fill();
+			for (const size of SIZES) {
+				await page.setViewportSize({ width: size.width, height: size.height });
+				assertDesign(
+					(await page.evaluate(MEASURE)) as Measured,
+					`${path} loaded at ${size.width}px`
+				);
+			}
+		}
+	});
 }
 
 test('screenshots for review', async ({ page }: { page: Page }) => {

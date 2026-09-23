@@ -7,11 +7,13 @@
  */
 import { magicFor, run } from '$lib/engine/client';
 import { formatBytes } from '$lib/download';
+import { release } from './release';
 import type { OutputFile } from '$lib/engine/contract';
 import {
 	GROUP_ORDER,
 	IMAGES,
 	PDF_ONLY,
+	METADATA_LABELS,
 	READABLE,
 	type Tool,
 	type ToolGroup,
@@ -22,7 +24,7 @@ import {
 // Shared field fragments
 // ---------------------------------------------------------------------------
 
-const pagesField = (help = 'Leave empty for every page.') =>
+const pagesField = (help = 'Deixe em branco para todas as páginas.') =>
 	({ kind: 'pages', key: 'pages', label: 'Páginas', help }) as const;
 
 const FONT_OPTIONS = [
@@ -57,10 +59,18 @@ const str = (ctx: ToolRunContext, key: string) => String(ctx.values[key] ?? '');
 const num = (ctx: ToolRunContext, key: string) => Number(ctx.values[key] ?? 0);
 const bool = (ctx: ToolRunContext, key: string) => Boolean(ctx.values[key]);
 
-/** Open a secondary file (a stamp, a logo) in the engine. */
-async function openExtra(file: File) {
+/**
+ * Open a secondary file (a stamp, a logo) in the engine for the duration of
+ * `use`, closing it afterwards whether or not `use` succeeds.
+ */
+async function withExtra<T>(file: File, use: (handle: string) => Promise<T>): Promise<T> {
 	const bytes = new Uint8Array(await file.arrayBuffer());
-	return run('open', { bytes, magic: magicFor(file) });
+	const info = await run('open', { bytes, magic: magicFor(file) });
+	try {
+		return await use(info.handle);
+	} finally {
+		release(info.handle);
+	}
 }
 
 /** Turn HTML produced on the main thread into a PDF via the engine. */
@@ -69,13 +79,38 @@ async function htmlToPdf(html: string, filename: string): Promise<OutputFile[]> 
 		bytes: new TextEncoder().encode(html),
 		magic: 'text/html'
 	});
-	return [await run('save', { handle: info.handle, filename })];
+	try {
+		return [await run('save', { handle: info.handle, filename })];
+	} finally {
+		release(info.handle);
+	}
 }
 
+/** Text going into generated HTML. Sheet names are user data. */
+const escapeHtml = (text: string) =>
+	text.replace(
+		/[&<>"']/g,
+		(c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!
+	);
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
 const percent = (before: number, after: number) =>
-	`${formatBytes(before)} to ${formatBytes(after)} (${
+	`De ${formatBytes(before)} para ${formatBytes(after)} (${
 		after < before ? `${Math.round((1 - after / before) * 100)}% menor` : 'sem redução'
 	})`;
+
+/** pt-BR names for MuPDF's permission keys, as the inspector lists them. */
+const PERMISSION_LABELS: Record<string, string> = {
+	print: 'imprimir',
+	copy: 'copiar texto',
+	edit: 'editar',
+	annotate: 'anotar',
+	form: 'preencher formulários',
+	accessibility: 'leitores de tela',
+	assemble: 'montar páginas',
+	'print-hq': 'imprimir em alta qualidade'
+};
 
 // ---------------------------------------------------------------------------
 // Catalog
@@ -153,12 +188,18 @@ export const tools: Tool[] = [
 		accept: READABLE,
 		keywords: ['extrair paginas', 'extrair páginas', 'selecionar'],
 		fields: [
-			{ kind: 'pages', key: 'pages', label: 'Páginas a manter', help: 'Por exemplo, 1-3,7' }
+			{
+				kind: 'pages',
+				key: 'pages',
+				label: 'Páginas a manter',
+				help: 'Por exemplo, 1-3,7.',
+				required: true
+			}
 		],
 		execute: async (ctx) =>
 			run('extract', {
 				handle: ctx.docs[0].handle,
-				selections: [{ pages: ctx.pages('pages') ?? [], filename: `${ctx.stem}-extracted.pdf` }]
+				selections: [{ pages: ctx.pages('pages')!, filename: `${ctx.stem}-extracted.pdf` }]
 			})
 	},
 	{
@@ -170,7 +211,13 @@ export const tools: Tool[] = [
 		accept: READABLE,
 		keywords: ['remover paginas', 'remover páginas', 'excluir', 'apagar'],
 		fields: [
-			{ kind: 'pages', key: 'pages', label: 'Páginas a excluir', help: 'Por exemplo, 2,5-6' }
+			{
+				kind: 'pages',
+				key: 'pages',
+				label: 'Páginas a excluir',
+				help: 'Por exemplo, 2,5-6.',
+				required: true
+			}
 		],
 		execute: async (ctx) => {
 			const remove = new Set(ctx.pages('pages') ?? []);
@@ -376,15 +423,14 @@ export const tools: Tool[] = [
 		execute: async (ctx) => {
 			const stamp = ctx.files.stamp;
 			if (!stamp) throw new Error('Escolha o documento que vai por cima');
-			const stampDoc = await openExtra(stamp);
-			return [
+			return withExtra(stamp, async (stampHandle) => [
 				await run('overlay', {
 					handle: ctx.docs[0].handle,
-					stampHandle: stampDoc.handle,
+					stampHandle,
 					behind: bool(ctx, 'behind'),
 					filename: `${ctx.stem}-overlaid.pdf`
 				})
-			];
+			]);
 		}
 	},
 	{
@@ -433,7 +479,7 @@ export const tools: Tool[] = [
 		accept: READABLE,
 		keywords: ['marca dagua', 'confidencial'],
 		fields: [
-			{ kind: 'text', key: 'text', label: "Texto da marca d'água", default: 'CONFIDENTIAL' },
+			{ kind: 'text', key: 'text', label: "Texto da marca d'água", default: 'CONFIDENCIAL' },
 			{ kind: 'number', key: 'size', label: 'Tamanho da fonte', min: 8, max: 200, default: 48 },
 			{ kind: 'color', key: 'color', label: 'Cor', default: '#ff0000' },
 			{ kind: 'number', key: 'opacity', label: 'Opacidade %', min: 5, max: 100, default: 25 },
@@ -551,7 +597,7 @@ export const tools: Tool[] = [
 		input: 'single',
 		accept: READABLE,
 		keywords: ['assinar', 'assinatura', 'logo', 'carimbo'],
-		note: 'Isto coloca uma imagem na página. Nao e uma assinatura digital com certificado.',
+		note: 'Isto coloca uma imagem na página. Não é uma assinatura digital com certificado.',
 		fields: [
 			{ kind: 'file', key: 'image', label: 'Imagem', accept: IMAGES },
 			{ kind: 'number', key: 'page', label: 'Número da página', min: 1, max: 99999, default: 1 },
@@ -610,7 +656,7 @@ export const tools: Tool[] = [
 	{
 		id: 'flatten-pdf',
 		title: 'Achatar PDF',
-		blurb: 'Transforme anotações e campos de formulário em conteudo fixo.',
+		blurb: 'Transforme anotações e campos de formulário em conteúdo fixo.',
 		group: 'Editar',
 		input: 'single',
 		accept: READABLE,
@@ -695,7 +741,7 @@ export const tools: Tool[] = [
 		accept: ['.docx'],
 		keywords: ['word', 'docx', 'documento'],
 		raw: true,
-		note: 'Passa por HTML, então títulos, listas, tabelas e ênfase sobrevivem, mas o layout exato, as colunas e as imagens flutuantes vao se deslocar.',
+		note: 'Passa por HTML, então títulos, listas, tabelas e ênfase sobrevivem, mas o layout exato, as colunas e as imagens flutuantes vão se deslocar.',
 		execute: async (ctx) => {
 			const file = ctx.sources[0];
 			const mammoth = await import('mammoth');
@@ -714,14 +760,14 @@ export const tools: Tool[] = [
 		accept: ['.xlsx', '.xls', '.csv'],
 		keywords: ['excel', 'planilha', 'xlsx', 'csv'],
 		raw: true,
-		note: 'Exporta o valor das células como tabelas. Gráficos, imagens e formatação condicional não vao junto.',
+		note: 'Exporta o valor das células como tabelas. Gráficos, imagens e formatação condicional não vão junto.',
 		execute: async (ctx) => {
 			const file = ctx.sources[0];
 			const XLSX = await import('xlsx');
 			const book = XLSX.read(await file.arrayBuffer(), { type: 'array' });
 			const sections = book.SheetNames.map(
 				(name) =>
-					`<h2>${name}</h2>${XLSX.utils.sheet_to_html(book.Sheets[name], { header: '', footer: '' })}`
+					`<h2>${escapeHtml(name)}</h2>${XLSX.utils.sheet_to_html(book.Sheets[name], { header: '', footer: '' })}`
 			).join('\n');
 			return htmlToPdf(
 				`<!doctype html><meta charset="utf-8"><style>table{border-collapse:collapse}td,th{border:1px solid #999;padding:3px;font-size:10px}</style>${sections}`,
@@ -733,6 +779,7 @@ export const tools: Tool[] = [
 	// --------------------------------------------------------- Convert from PDF
 	{
 		id: 'pdf-to-jpg',
+		rasterizes: true,
 		title: 'PDF para JPG',
 		blurb: 'Salve cada página como uma imagem JPEG.',
 		group: 'Converter de PDF',
@@ -758,6 +805,7 @@ export const tools: Tool[] = [
 	},
 	{
 		id: 'pdf-to-png',
+		rasterizes: true,
 		title: 'PDF para PNG',
 		blurb: 'Salve cada página como uma imagem PNG sem perda.',
 		group: 'Converter de PDF',
@@ -883,7 +931,7 @@ export const tools: Tool[] = [
 	{
 		id: 'pdf-to-html',
 		title: 'PDF para HTML',
-		blurb: 'Exporte uma página web que preserva a posicao do texto.',
+		blurb: 'Exporte uma página web que preserva a posição do texto.',
 		group: 'Converter de PDF',
 		input: 'single',
 		accept: READABLE,
@@ -1015,7 +1063,7 @@ export const tools: Tool[] = [
 		input: 'single',
 		accept: PDF_ONLY,
 		keywords: ['tirar senha', 'remover senha', 'desbloquear', 'descriptografar'],
-		note: 'Você precisa saber a senha: ela e pedida ao abrir o arquivo. Esta ferramenta não quebra criptografia.',
+		note: 'Você precisa saber a senha: ela é pedida ao abrir o arquivo. Esta ferramenta não quebra criptografia.',
 		execute: async (ctx) => [
 			await run('unlock', { handle: ctx.docs[0].handle, filename: `${ctx.stem}-unlocked.pdf` })
 		]
@@ -1182,6 +1230,7 @@ export const tools: Tool[] = [
 	},
 	{
 		id: 'grayscale-pdf',
+		rasterizes: true,
 		title: 'Converter para cinza',
 		blurb: 'Tire todas as cores, para imprimir mais barato.',
 		group: 'Otimizar',
@@ -1202,6 +1251,7 @@ export const tools: Tool[] = [
 	},
 	{
 		id: 'rasterize-pdf',
+		rasterizes: true,
 		title: 'Achatar em imagens',
 		blurb: 'Redesenhe cada página como imagem para que o texto não possa ser copiado.',
 		group: 'Otimizar',
@@ -1240,6 +1290,7 @@ export const tools: Tool[] = [
 	// ----------------------------------------------------------------- Extract
 	{
 		id: 'ocr-pdf',
+		rasterizes: true,
 		title: 'OCR em PDF digitalizado',
 		blurb: 'Reconheça o texto de um documento digitalizado e torne o arquivo pesquisável.',
 		group: 'Extrair',
@@ -1326,12 +1377,14 @@ export const tools: Tool[] = [
 				Anexos: String(report.counts.attachments),
 				Camadas: String(report.counts.layers),
 				'Contém JavaScript': report.hasJavaScript ? 'Sim, considere limpar o arquivo' : 'Não',
-				Permitido: Object.entries(report.permissions)
-					.filter(([, allowed]) => allowed)
-					.map(([name]) => name)
-					.join(', ')
+				Permitido:
+					Object.entries(report.permissions)
+						.filter(([, allowed]) => allowed)
+						.map(([name]) => PERMISSION_LABELS[name] ?? name)
+						.join(', ') || 'nada'
 			};
-			for (const [key, value] of Object.entries(report.metadata)) if (value) details[key] = value;
+			for (const [key, value] of Object.entries(report.metadata))
+				if (value) details[METADATA_LABELS[key] ?? key] = value;
 
 			return {
 				files: [
@@ -1341,7 +1394,7 @@ export const tools: Tool[] = [
 						bytes: new TextEncoder().encode(JSON.stringify(report, null, 2))
 					}
 				],
-				summary: `${report.pageCount} páginas, ${formatBytes(ctx.docs[0].byteLength)}`,
+				summary: `${plural(report.pageCount, 'página', 'páginas')}, ${formatBytes(ctx.docs[0].byteLength)}`,
 				details
 			};
 		}

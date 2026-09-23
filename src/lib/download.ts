@@ -20,24 +20,35 @@ export function downloadFile(file: OutputFile) {
  * out as one zip. PDFs are already deflated internally, so the entries are
  * stored rather than recompressed — same bytes, far less CPU.
  */
-export function downloadAll(files: OutputFile[], zipName = 'pdfwiz.zip') {
+export function downloadAll(files: OutputFile[], zipName = 'aegis.zip') {
 	if (files.length === 1) {
 		downloadFile(files[0]);
 		return;
 	}
-	const entries: Record<string, [Uint8Array, { level: 0 }]> = {};
-	files.forEach((file, index) => {
-		// Duplicate names would silently overwrite each other inside the zip.
-		const name = entries[file.filename]
-			? file.filename.replace(/(\.[^.]+)?$/, `-${index + 1}$1`)
-			: file.filename;
-		entries[name] = [file.bytes, { level: 0 }];
-	});
-	save(new Blob([zipSync(entries) as BlobPart], { type: 'application/zip' }), zipName);
+	save(new Blob([zipSync(zipEntries(files)) as BlobPart], { type: 'application/zip' }), zipName);
 }
 
-/** "document.pdf" -> "document" */
-export const baseName = (filename: string) => filename.replace(/\.[^./\\]+$/, '');
+/**
+ * Zip entries keyed by a name unique across the whole archive. Duplicate
+ * names would silently overwrite each other, and one "-2" suffix is not
+ * enough: "a.pdf, a.pdf, a-2.pdf" collides again on the rename.
+ */
+export function zipEntries(files: OutputFile[]) {
+	const entries: Record<string, [Uint8Array, { level: 0 }]> = {};
+	for (const file of files) {
+		let name = file.filename;
+		for (let n = 2; name in entries; n++) name = file.filename.replace(/(\.[^.]+)?$/, `-${n}$1`);
+		entries[name] = [file.bytes, { level: 0 }];
+	}
+	return entries;
+}
+
+/** Extensions this app accepts. Only these are stripped for output names. */
+const KNOWN_EXTENSION =
+	/\.(pdf|md|markdown|txt|html?|xhtml|epub|mobi|fb2|cbz|xps|svg|png|jpe?g|gif|bmp|webp|tiff?|docx|xlsx|xls|csv)$/i;
+
+/** "document.pdf" -> "document", but "Report v1.2" stays "Report v1.2". */
+export const baseName = (filename: string) => filename.replace(KNOWN_EXTENSION, '');
 
 export function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;

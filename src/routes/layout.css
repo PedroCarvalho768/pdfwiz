@@ -139,12 +139,34 @@
 		scrollbar-width: thin;
 	}
 
-	/* A <select> falls back to the platform palette unless both are set,
-	   which reads as a white popup on a dark page. */
-	select,
-	option {
-		background-color: var(--color-surface);
+	/* @tailwindcss/forms paints every text control #fff and leaves `color`
+	   inherited. In dark mode that is near-white ink on a white box: typed
+	   text is invisible. Theme the control surface here, once, for both
+	   schemes. The `html` prefix outranks the plugin's (0,0,1) selectors
+	   regardless of emit order; utilities (bg-*, border-*) still win because
+	   they live in a later layer. */
+	html input:where(:not([type])),
+	html
+		input:where(
+			[type='text'],
+			[type='email'],
+			[type='url'],
+			[type='password'],
+			[type='number'],
+			[type='search'],
+			[type='tel'],
+			[type='date'],
+			[type='datetime-local'],
+			[type='month'],
+			[type='time'],
+			[type='week']
+		),
+	html textarea,
+	html select,
+	html option {
+		background-color: var(--color-bg);
 		color: var(--color-ink);
+		border-color: var(--color-line);
 	}
 
 	button,

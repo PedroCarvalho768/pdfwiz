@@ -7,53 +7,24 @@
  * component, a text preview, and multi-file zip output.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import * as mupdf from 'mupdf';
+import { readFileSync } from 'node:fs';
+import {
+	downloadButton,
+	fixturePdf,
+	grabDownload,
+	lockedPdf,
+	openPdf,
+	textOf,
+	write,
+	zipNames
+} from './helpers';
 
-function write(name: string, bytes: Uint8Array): string {
-	const path = join(mkdtempSync(join(tmpdir(), 'pdfwiz-')), name);
-	writeFileSync(path, bytes);
-	return path;
-}
-
-function fixturePdf(name: string, markers: string[]): string {
-	const buffer = new mupdf.Buffer();
-	const writer = new mupdf.DocumentWriter(buffer, 'pdf', 'compress');
-	for (const marker of markers) {
-		// Trailing newline matters: MuPDF's markdown parser drops the last
-		// character without it. See normaliseInput() in shared.ts.
-		const src = mupdf.Document.openDocument(
-			new TextEncoder().encode(`# ${marker}\n`),
-			'text/markdown'
-		);
-		for (let i = 0; i < src.countPages(); i++) {
-			const page = src.loadPage(i);
-			const device = writer.beginPage(page.getBounds());
-			page.run(device, mupdf.Matrix.identity);
-			device.close();
-			writer.endPage();
-		}
-	}
-	writer.close();
-	return write(name, buffer.asUint8Array());
-}
-
-async function grabDownload(page: Page, action: () => Promise<void>) {
-	const [download] = await Promise.all([page.waitForEvent('download'), action()]);
-	const path = join(mkdtempSync(join(tmpdir(), 'pdfwiz-out-')), download.suggestedFilename());
-	await download.saveAs(path);
-	return { name: download.suggestedFilename(), bytes: readFileSync(path) };
-}
-
-const openPdf = (bytes: Buffer) =>
-	mupdf.Document.openDocument(new Uint8Array(bytes), 'application/pdf');
-
-const textOf = (doc: mupdf.Document, page: number) =>
-	doc.loadPage(page).toStructuredText('').asText();
-
-const downloadButton = (page: Page) => page.getByRole('button', { name: 'Baixar', exact: true });
+/** The value cell next to a label in the result's details table. */
+const detail = (page: Page, term: string) =>
+	page
+		.locator('dl > div')
+		.filter({ has: page.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }) })
+		.getByRole('definition');
 
 test('the directory searches tools, including in Portuguese', async ({ page }) => {
 	await page.goto('/');
@@ -76,6 +47,8 @@ test('a field-driven tool renders its form and applies the values', async ({ pag
 	await page.getByRole('button', { name: 'Girar PDF' }).click();
 
 	const result = await grabDownload(page, () => downloadButton(page).click());
+	// Named after the file, not the PDF's /Title.
+	expect(result.name).toBe('two-rotated.pdf');
 	const saved = openPdf(result.bytes).asPDF()!;
 	const rotationOf = (i: number) => {
 		const value = saved.loadPage(i).getObject().get('Rotate');
@@ -95,6 +68,22 @@ test('an invalid page selection blocks the run instead of failing later', async 
 	await expect(page.getByRole('button', { name: 'Girar PDF' })).toBeDisabled();
 });
 
+test('a required page selection left empty blocks the run', async ({ page }) => {
+	await page.goto('/extract-pages');
+	await page.setInputFiles('input[type=file]', fixturePdf('two.pdf', ['One', 'Two']));
+
+	const button = page.getByRole('button', { name: 'Extrair páginas' });
+	await expect(button).toBeDisabled();
+	await expect(page.getByText('Preencha Páginas a manter primeiro.')).toBeVisible();
+
+	await page.getByLabel('Páginas a manter').fill('2');
+	await button.click();
+	const result = await grabDownload(page, () => downloadButton(page).click());
+	const saved = openPdf(result.bytes);
+	expect(saved.countPages()).toBe(1);
+	expect(textOf(saved, 0)).toContain('Two');
+});
+
 test('protecting then reopening prompts for the password', async ({ page }) => {
 	await page.goto('/protect-pdf');
 	await page.setInputFiles('input[type=file]', fixturePdf('secret.pdf', ['Secret']));
@@ -111,7 +100,7 @@ test('protecting then reopening prompts for the password', async ({ page }) => {
 	await page.setInputFiles('input[type=file]', lockedPath);
 
 	await expect(page.getByText('Este PDF está protegido por senha')).toBeVisible();
-	await page.getByPlaceholder('Senha').fill('hunter2');
+	await page.getByLabel('Senha de locked.pdf').fill('hunter2');
 	await page.getByRole('button', { name: 'Desbloquear' }).click();
 
 	await page.getByRole('button', { name: 'Tirar a senha' }).click();
@@ -120,17 +109,39 @@ test('protecting then reopening prompts for the password', async ({ page }) => {
 });
 
 test('a wrong password is reported rather than silently accepted', async ({ page }) => {
-	await page.goto('/protect-pdf');
-	await page.setInputFiles('input[type=file]', fixturePdf('secret.pdf', ['Secret']));
-	await page.getByLabel('Senha para abrir').fill('hunter2');
-	await page.getByRole('button', { name: 'Proteger com senha' }).click();
-	const locked = await grabDownload(page, () => downloadButton(page).click());
-
 	await page.goto('/unlock-pdf');
-	await page.setInputFiles('input[type=file]', write('l.pdf', new Uint8Array(locked.bytes)));
-	await page.getByPlaceholder('Senha').fill('wrong-one');
+	await page.setInputFiles('input[type=file]', lockedPdf('l.pdf', ['Secret'], 'hunter2'));
+	await page.getByLabel('Senha de l.pdf').fill('wrong-one');
 	await page.getByRole('button', { name: 'Desbloquear' }).click();
 	await expect(page.getByRole('alert')).toContainText(/não foi aceita/);
+	// Focused, so it is seen and announced even below the fold.
+	await expect(page.getByRole('alert')).toBeFocused();
+});
+
+test('a locked file in a batch pauses the queue instead of dropping files', async ({ page }) => {
+	await page.goto('/merge-pdf');
+	await page.setInputFiles('input[type=file]', [
+		fixturePdf('alpha.pdf', ['Alpha']),
+		lockedPdf('locked.pdf', ['Locked'], 'pw'),
+		fixturePdf('charlie.pdf', ['Charlie'])
+	]);
+
+	// The prompt names the file that is actually locked.
+	await expect(page.getByText('Digite a senha para abrir locked.pdf')).toBeVisible({
+		timeout: 30_000
+	});
+	await page.getByLabel('Senha de locked.pdf').fill('pw');
+	await page.getByRole('button', { name: 'Desbloquear' }).click();
+
+	await expect(page.getByRole('button', { name: /Juntar 3 arquivos/ })).toBeEnabled();
+	await page.getByRole('button', { name: /Juntar 3 arquivos/ }).click();
+	const result = await grabDownload(page, () => downloadButton(page).click());
+	const merged = openPdf(result.bytes);
+	expect([0, 1, 2].map((i) => textOf(merged, i))).toEqual([
+		expect.stringContaining('Alpha'),
+		expect.stringContaining('Locked'),
+		expect.stringContaining('Charlie')
+	]);
 });
 
 test('redaction removes the text from the downloaded file', async ({ page }) => {
@@ -167,14 +178,17 @@ test('an image export produces one file per page, zipped', async ({ page }) => {
 	await page.setInputFiles('input[type=file]', fixturePdf('three.pdf', ['A', 'B', 'C']));
 	await page.getByRole('button', { name: 'PDF para PNG' }).click();
 
-	await expect(page.getByRole('heading', { name: /3\s+arquivos/ })).toBeVisible({
-		timeout: 30_000
-	});
+	const heading = page.getByRole('heading', { name: /3\s+arquivos/ });
+	await expect(heading).toBeVisible({ timeout: 30_000 });
+	// The result takes focus, so keyboard users land on it.
+	await expect(heading).toBeFocused();
 	const result = await grabDownload(page, () =>
 		page.getByRole('button', { name: /Baixar tudo/ }).click()
 	);
 	expect(result.name).toMatch(/\.zip$/);
-	expect(result.bytes.subarray(0, 2).toString('latin1')).toBe('PK');
+	const names = zipNames(result.bytes);
+	expect(names).toHaveLength(3);
+	for (const name of names) expect(name).toMatch(/\.png$/);
 });
 
 test('the text editor rewrites a line in place', async ({ page }) => {
@@ -192,6 +206,25 @@ test('the text editor rewrites a line in place', async ({ page }) => {
 	const text = textOf(openPdf(result.bytes), 0);
 	expect(text).toContain('NewWord');
 	expect(text).not.toContain('OldWord');
+});
+
+test('text edits survive switching pages and are saved together', async ({ page }) => {
+	await page.goto('/edit-pdf-text');
+	await page.setInputFiles('input[type=file]', fixturePdf('e.pdf', ['FirstOld', 'SecondOld']));
+
+	await expect(page.getByLabel('Linha 1')).toHaveValue(/FirstOld/, { timeout: 30_000 });
+	await page.getByLabel('Linha 1').fill('FirstNew');
+	await page.getByLabel('Página').selectOption({ label: '2' });
+	await expect(page.getByLabel('Linha 1')).toHaveValue(/SecondOld/);
+	await page.getByLabel('Linha 1').fill('SecondNew');
+	await page.getByLabel('Página').selectOption({ label: '1' });
+	await expect(page.getByLabel('Linha 1')).toHaveValue('FirstNew');
+
+	await page.getByRole('button', { name: /Salvar 2 alterações/ }).click();
+	const result = await grabDownload(page, () => downloadButton(page).click());
+	const doc = openPdf(result.bytes);
+	expect(textOf(doc, 0)).toContain('FirstNew');
+	expect(textOf(doc, 1)).toContain('SecondNew');
 });
 
 test('a raw-input tool converts Word without the engine opening it first', async ({ page }) => {
@@ -217,7 +250,9 @@ test('the inspector reports document details', async ({ page }) => {
 	await page.getByRole('button', { name: 'Inspecionar PDF' }).click();
 
 	await expect(page.getByText('2 páginas,')).toBeVisible();
-	await expect(page.getByRole('definition').filter({ hasText: 'No' }).first()).toBeVisible();
+	await expect(detail(page, 'Criptografado')).toHaveText('Não');
+	await expect(detail(page, 'Contém JavaScript')).toHaveText('Não');
+	await expect(detail(page, 'Permitido')).toContainText('imprimir');
 });
 
 test('corrupting produces a file that no longer opens', async ({ page }) => {
@@ -229,10 +264,18 @@ test('corrupting produces a file that no longer opens', async ({ page }) => {
 	expect(() => openPdf(result.bytes).countPages()).toThrow();
 });
 
-test('compression reports the size change', async ({ page }) => {
+test('compression produces a smaller file and says by how much', async ({ page }) => {
+	const input = fixturePdf('big.pdf', ['One', 'Two', 'Three']);
 	await page.goto('/compress-pdf');
-	await page.setInputFiles('input[type=file]', fixturePdf('big.pdf', ['One', 'Two', 'Three']));
+	await page.setInputFiles('input[type=file]', input);
 	await page.getByRole('button', { name: 'Comprimir PDF' }).click();
 
-	await expect(page.getByText(/(menor|sem redução)/)).toBeVisible({ timeout: 30_000 });
+	await expect(page.getByText(/^De [\d.,]+ [KM]?B para [\d.,]+ [KM]?B \(\d+% menor\)/)).toBeVisible(
+		{
+			timeout: 30_000
+		}
+	);
+	const result = await grabDownload(page, () => downloadButton(page).click());
+	expect(result.bytes.byteLength).toBeLessThan(readFileSync(input).byteLength);
+	expect(openPdf(result.bytes).countPages()).toBe(3);
 });

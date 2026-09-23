@@ -1,4 +1,4 @@
-# PDFWiz
+# Aegis
 
 52 ferramentas de PDF que rodam inteiramente no navegador. Juntar, dividir,
 editar texto, converter, comprimir, assinar, tarjar, criptografar, tirar
@@ -25,10 +25,11 @@ src/lib/engine/
   worker.ts     message shim over jobs/; holds no PDF logic
   client.ts     main-thread handle on the worker
 src/lib/tools/  registry.ts (the catalog) + components for custom UI
-src/lib/ui/     FormTool renders any field-driven tool; LocalProof is the hero
+src/lib/ui/     ToolPage is the shared tool body; FormTool renders any field-driven tool; LocalProof is the hero
 src/routes/
   +page.svelte        searchable tool index
-  [tool]/+page.svelte ONE generic page that renders every tool
+  [tool]/+page.svelte ONE generic page that renders every tool (via ToolPage)
+  sitemap.xml/        prerendered sitemap of all tool URLs
 ```
 
 [MuPDF](https://mupdf.com/) does nearly all of the work: page manipulation,
@@ -99,6 +100,21 @@ Each of these cost real debugging time and is commented at the source:
   into a canvas and reading the pixel back.
 - **The markdown parser drops the last character** when input does not end in
   a newline. Normalised on the way in.
+- **`@tailwindcss/forms` paints every text control `#fff`** and leaves `color`
+  inherited, so in dark mode typed text was near-white on white. The controls
+  are themed once in `layout.css` (`html input:where(...)`, which outranks the
+  plugin's `:where()` selectors). The audit fills real inputs to catch it.
+- **Same-route navigation keeps component state.** `/merge-pdf` to
+  `/split-pdf` is the same route with new params, so the tool body lives in
+  `ToolPage.svelte` under `{#key tool.id}`. Do not reintroduce a reset effect.
+- **A meta CSP does not reach workers.** The policy in `vite.config.ts` is
+  emitted as `<meta http-equiv>` on every prerendered page and governs the
+  document. Workers loaded from a URL (MuPDF, Tesseract) take their policy
+  from their own response headers, so send the same policy as an HTTP header
+  from the host to cover them.
+- **tesseract.js loads code from a CDN by default.** Its worker and WASM core
+  are bundled from `node_modules` instead (`?url` imports in `OcrTool.svelte`);
+  only the language model comes from `cdn.jsdelivr.net`, and the page says so.
 
 ## Development
 
@@ -116,9 +132,13 @@ npm run dev
 | `npm run build`        | Static site in `build/`, deployable to any CDN.          |
 
 `e2e/audit.e2e.ts` is the design guard: it asserts zero horizontal overflow,
-zero contrast failures, zero em-dashes, zero eyebrows, h1 at most 3 lines and
-no unaccented pt-BR words, across light and dark at 390 / 768 / 1440 on three
-pages. `pairs.txt` holds the resolved token pairs for a standalone WCAG check.
+zero contrast failures, zero em-dashes, zero eyebrows, no tap target under
+24x24 px and h1 at most 3 lines, across light and dark at 390 / 768 / 1440 on
+the homepage and all 52 tool pages, plus a few tools with a file loaded and
+inputs filled. `src/lib/tools/copy.spec.ts` is the copy guard: it scans the
+catalog and every UI source file for English leftovers and pt-BR words typed
+without accents. `pairs.txt` holds the resolved token pairs for a standalone
+WCAG check.
 
 The same `mupdf` package runs in Node, so every job handler is testable
 headlessly. Assert by re-opening produced bytes, never on byte equality;
@@ -146,7 +166,9 @@ Stated plainly, and repeated in the UI on the tools they affect:
 - **Signing** places an image on the page. It is not a cryptographic
   signature; PKCS#7 in the WASM build is unverified.
 - **Grayscale and flatten-to-images rasterise**, destroying the text layer.
-- **OCR downloads a language model** from a public CDN on first use. The
+- **OCR downloads a language model** (`<lang>.traineddata.gz`) from
+  `cdn.jsdelivr.net` on first use of each language. It is the only
+  third-party request in the app, and the page CSP allows no other host. The
   document itself never leaves the device, and the tool says so on the page.
 
 ## Licence

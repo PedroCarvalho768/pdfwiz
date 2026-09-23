@@ -7,7 +7,7 @@
 	let { docs, busy, run }: ToolProps = $props();
 
 	const doc = $derived(docs[0]);
-	const stem = $derived(baseName(doc?.title || 'document'));
+	const stem = $derived(baseName(doc?.filename ?? 'documento'));
 
 	let mode = $state<'ranges' | 'every' | 'single'>('ranges');
 	let ranges = $state('1-1');

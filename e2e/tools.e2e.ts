@@ -5,52 +5,18 @@
  * tests only guard what Node cannot see: bundling, worker startup, the WASM
  * fetch, the message channel and the download path.
  */
-import { expect, test, type Page } from '@playwright/test';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import * as mupdf from 'mupdf';
+import { expect, test } from '@playwright/test';
+import {
+	downloadButton,
+	fixturePdf,
+	grabDownload,
+	openPdf,
+	pageTexts,
+	textOf,
+	zipNames
+} from './helpers';
 
-function fixturePdf(name: string, markers: string[]): string {
-	const buffer = new mupdf.Buffer();
-	const writer = new mupdf.DocumentWriter(buffer, 'pdf', 'compress');
-	for (const marker of markers) {
-		// Trailing newline matters: MuPDF's markdown parser drops the last
-		// character without it. See normaliseInput() in jobs.ts.
-		const src = mupdf.Document.openDocument(
-			new TextEncoder().encode(`# ${marker}\n`),
-			'text/markdown'
-		);
-		for (let i = 0; i < src.countPages(); i++) {
-			const page = src.loadPage(i);
-			const device = writer.beginPage(page.getBounds());
-			page.run(device, mupdf.Matrix.identity);
-			device.close();
-			writer.endPage();
-		}
-	}
-	writer.close();
-
-	const path = join(mkdtempSync(join(tmpdir(), 'pdfwiz-')), name);
-	writeFileSync(path, buffer.asUint8Array());
-	return path;
-}
-
-/** Read a downloaded PDF back with MuPDF so we assert on content, not clicks. */
-async function grabDownload(page: Page, action: () => Promise<void>) {
-	const [download] = await Promise.all([page.waitForEvent('download'), action()]);
-	const path = join(mkdtempSync(join(tmpdir(), 'pdfwiz-out-')), download.suggestedFilename());
-	await download.saveAs(path);
-	return { name: download.suggestedFilename(), bytes: readFileSync(path) };
-}
-
-const openPdf = (bytes: Buffer) =>
-	mupdf.Document.openDocument(new Uint8Array(bytes), 'application/pdf');
-
-const textOf = (doc: mupdf.Document, page: number) =>
-	doc.loadPage(page).toStructuredText('').asText();
-
-test('merges two documents into one, in the order shown', async ({ page }) => {
+test('merges documents in the order shown, after reordering and removing', async ({ page }) => {
 	const failures: string[] = [];
 	page.on('pageerror', (error) => failures.push(error.message));
 
@@ -59,19 +25,25 @@ test('merges two documents into one, in the order shown', async ({ page }) => {
 		fixturePdf('alpha.pdf', ['Alpha']),
 		fixturePdf('bravo.pdf', ['Bravo'])
 	]);
+	await expect(page.getByRole('button', { name: /Juntar 2 arquivos/ })).toBeEnabled({
+		timeout: 30_000
+	});
 
+	// Adding a third file must not undo the manual order.
+	await page.getByRole('button', { name: 'Mover bravo.pdf para cima' }).click();
+	await page.setInputFiles('input[type=file]', fixturePdf('charlie.pdf', ['Charlie']));
+	await expect(page.getByRole('button', { name: /Juntar 3 arquivos/ })).toBeEnabled();
+
+	await page.getByRole('button', { name: 'Remover alpha.pdf' }).click();
 	const mergeButton = page.getByRole('button', { name: /Juntar 2 arquivos/ });
-	await expect(mergeButton).toBeEnabled({ timeout: 30_000 });
+	await expect(mergeButton).toBeEnabled();
 	await mergeButton.click();
 
-	const result = await grabDownload(page, () =>
-		page.getByRole('button', { name: 'Baixar', exact: true }).click()
-	);
-
-	const merged = openPdf(result.bytes);
-	expect(merged.countPages()).toBe(2);
-	expect(textOf(merged, 0)).toContain('Alpha');
-	expect(textOf(merged, 1)).toContain('Bravo');
+	const result = await grabDownload(page, () => downloadButton(page).click());
+	const texts = pageTexts(result.bytes);
+	expect(texts).toHaveLength(2);
+	expect(texts[0]).toContain('Bravo');
+	expect(texts[1]).toContain('Charlie');
 	expect(failures).toEqual([]);
 });
 
@@ -88,8 +60,7 @@ test('splits one document into a zip of separate files', async ({ page }) => {
 		page.getByRole('button', { name: /Baixar tudo/ }).click()
 	);
 	expect(result.name).toMatch(/\.zip$/);
-	// PK zip magic — proves we produced a real archive, not an empty blob.
-	expect(result.bytes.subarray(0, 2).toString('latin1')).toBe('PK');
+	expect(zipNames(result.bytes)).toEqual(['three-1.pdf', 'three-2.pdf', 'three-3.pdf']);
 });
 
 test('reorders and deletes pages, and saves the result', async ({ page }) => {
@@ -100,17 +71,45 @@ test('reorders and deletes pages, and saves the result', async ({ page }) => {
 	await expect(page.getByRole('img', { name: 'Página 1' })).toBeVisible({ timeout: 30_000 });
 	await expect(page.getByRole('img', { name: 'Página 3' })).toBeVisible();
 
-	await page.getByRole('button', { name: 'Excluir página' }).first().click();
+	await page.getByRole('button', { name: 'Excluir página 1' }).click();
 	await expect(page.getByText('2 de 3 páginas mantidas')).toBeVisible();
 
 	await page.getByRole('button', { name: 'Salvar PDF' }).click();
-	const result = await grabDownload(page, () =>
-		page.getByRole('button', { name: 'Baixar', exact: true }).click()
-	);
+	const result = await grabDownload(page, () => downloadButton(page).click());
 
 	const saved = openPdf(result.bytes);
 	expect(saved.countPages()).toBe(2);
 	expect(textOf(saved, 0)).toContain('Two');
+});
+
+test('a deleted page can be brought back with Desfazer', async ({ page }) => {
+	await page.goto('/organize-pdf');
+	await page.setInputFiles('input[type=file]', fixturePdf('three.pdf', ['One', 'Two', 'Three']));
+	await expect(page.getByRole('img', { name: 'Página 2' })).toBeVisible({ timeout: 30_000 });
+
+	await page.getByRole('button', { name: 'Excluir página 2' }).click();
+	await expect(page.getByText('2 de 3 páginas mantidas')).toBeVisible();
+	await page.getByRole('button', { name: 'Desfazer' }).click();
+	await expect(page.getByText('3 de 3 páginas mantidas')).toBeVisible();
+	await expect(page.getByRole('img', { name: 'Página 2' })).toBeVisible();
+});
+
+test('reorders pages from the keyboard alone', async ({ page }) => {
+	await page.goto('/organize-pdf');
+	await page.setInputFiles('input[type=file]', fixturePdf('three.pdf', ['One', 'Two', 'Three']));
+	await expect(page.getByRole('img', { name: 'Página 3' })).toBeVisible({ timeout: 30_000 });
+
+	await page.getByRole('button', { name: 'Mover página 1 para frente' }).focus();
+	await page.keyboard.press('Enter');
+	await page.getByRole('button', { name: 'Mover página 1 para frente' }).focus();
+	await page.keyboard.press('Space');
+
+	await page.getByRole('button', { name: 'Salvar PDF' }).click();
+	const result = await grabDownload(page, () => downloadButton(page).click());
+	const texts = pageTexts(result.bytes);
+	expect(texts[0]).toContain('Two');
+	expect(texts[1]).toContain('Three');
+	expect(texts[2]).toContain('One');
 });
 
 test('rotates a page and carries the rotation into the saved file', async ({ page }) => {
@@ -120,14 +119,12 @@ test('rotates a page and carries the rotation into the saved file', async ({ pag
 	const firstThumb = page.getByRole('img', { name: 'Página 1' });
 	await expect(firstThumb).toBeVisible({ timeout: 30_000 });
 
-	await page.getByRole('button', { name: 'Girar à direita' }).first().click();
+	await page.getByRole('button', { name: 'Girar página 1 à direita' }).click();
 	// The preview must actually turn; a silent no-op here shipped once already.
 	await expect(firstThumb).toHaveAttribute('style', /rotate\(90deg\)/);
 
 	await page.getByRole('button', { name: 'Salvar PDF' }).click();
-	const result = await grabDownload(page, () =>
-		page.getByRole('button', { name: 'Baixar', exact: true }).click()
-	);
+	const result = await grabDownload(page, () => downloadButton(page).click());
 
 	const saved = openPdf(result.bytes).asPDF()!;
 	// MuPDF may write an explicit /Rotate 0 or omit the key entirely, so

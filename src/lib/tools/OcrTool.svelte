@@ -7,10 +7,19 @@
 	 * pages are then merged back together. The output is therefore
 	 * image-based — any vector text in the original is rasterised — which is
 	 * the right trade for a scan and the wrong one for a born-digital file.
+	 *
+	 * Code is self-hosted. tesseract.js defaults to loading its worker and its
+	 * WASM core from cdn.jsdelivr.net, which would execute third-party code
+	 * with no integrity check. Both are bundled from node_modules here; only
+	 * the language model (data, not code) comes from the CDN.
 	 */
 	import { run as runJob } from '$lib/engine/client';
 	import { baseName } from '$lib/download';
+	import { release } from './release';
 	import type { ToolProps } from './types';
+	import workerPath from 'tesseract.js/dist/worker.min.js?url';
+	import coreSimd from 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url';
+	import corePlain from 'tesseract.js-core/tesseract-core-lstm.wasm.js?url';
 
 	let { docs, busy, run }: ToolProps = $props();
 
@@ -31,9 +40,25 @@
 		['ara', 'Árabe']
 	];
 
-	let language = $state('eng');
+	/** The one network request this tool makes. Keep the copy below in sync. */
+	const MODEL_HOST = 'cdn.jsdelivr.net';
+	const modelUrl = (lang: string) =>
+		`https://${MODEL_HOST}/npm/@tesseract.js-data/${lang}/4.0.0_best_int`;
+
+	// wasm-feature-detect's SIMD probe (the same bytes tesseract.js uses).
+	const hasSimd = () =>
+		WebAssembly.validate(
+			new Uint8Array([
+				0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0,
+				253, 15, 253, 98, 11
+			])
+		);
+
+	let language = $state('por');
 	let dpi = $state(200);
 	let status = $state('');
+
+	const languageLabel = $derived(LANGUAGES.find(([code]) => code === language)?.[1] ?? language);
 
 	const start = () =>
 		run(async () => {
@@ -46,11 +71,17 @@
 			});
 
 			const { createWorker } = await import('tesseract.js');
-			status = `Baixando o modelo de ${language}…`;
-			const worker = await createWorker(language);
+			status = `Preparando o modelo de ${languageLabel}…`;
+			const worker = await createWorker(language, undefined, {
+				workerPath,
+				// Loaded as a same-origin URL, not wrapped in a blob.
+				workerBlobURL: false,
+				corePath: hasSimd() ? coreSimd : corePlain,
+				langPath: modelUrl(language)
+			});
 
+			const handles: string[] = [];
 			try {
-				const handles: string[] = [];
 				for (const [index, image] of images.entries()) {
 					status = `Lendo a página ${index + 1} de ${images.length}…`;
 					const result = await worker.recognize(
@@ -59,7 +90,7 @@
 						{ pdf: true }
 					);
 					const pdf = result.data.pdf;
-					if (!pdf) throw new Error('Tesseract returned no PDF for this page');
+					if (!pdf) throw new Error(`O OCR não gerou um PDF para a página ${index + 1}`);
 					const opened = await runJob('open', {
 						bytes: new Uint8Array(pdf),
 						magic: 'application/pdf'
@@ -68,22 +99,24 @@
 				}
 
 				status = 'Montando o documento…';
-				const stem = baseName(doc.title || 'document');
+				const stem = baseName(doc.filename);
 				const file =
 					handles.length === 1
 						? await runJob('save', { handle: handles[0], filename: `${stem}-ocr.pdf` })
 						: await runJob('merge', { handles, filename: `${stem}-ocr.pdf` });
 
-				const text = await runJob('extractText', {
-					handle: (await runJob('open', { bytes: file.bytes, magic: 'application/pdf' })).handle
-				});
+				const merged = await runJob('open', { bytes: file.bytes, magic: 'application/pdf' });
+				handles.push(merged.handle);
+				const text = await runJob('extractText', { handle: merged.handle });
 
+				const words = text.trim().split(/\s+/).filter(Boolean).length;
 				return {
 					files: [file],
-					summary: `${text.trim().split(/\s+/).filter(Boolean).length} palavras reconhecidas em ${images.length} página${images.length === 1 ? '' : 's'}.`,
+					summary: `${words} ${words === 1 ? 'palavra reconhecida' : 'palavras reconhecidas'} em ${images.length} página${images.length === 1 ? '' : 's'}.`,
 					preview: text
 				};
 			} finally {
+				release(...handles);
 				await worker.terminate();
 				status = '';
 			}
@@ -119,11 +152,15 @@
 
 	<!--
 		The privacy claim on every other page is absolute, so the one exception
-		has to be stated plainly rather than buried.
+		has to be stated plainly rather than buried. It must name exactly what
+		is fetched and from where; see MODEL_HOST and modelUrl above.
 	-->
 	<p class="rounded-[var(--radius-control)] bg-accent-soft p-3 text-xs text-ink">
-		<strong>Uma requisição de rede.</strong> The language model is downloaded from a public CDN the first
-		time you use it. Your document is still processed entirely on this device and is never uploaded.
+		<strong>Uma requisição de rede.</strong> Na primeira vez que você usa um idioma, o modelo de
+		reconhecimento dele (o arquivo <code>{language}.traineddata.gz</code>) é baixado de
+		<code>{MODEL_HOST}</code>, uma CDN pública, e fica guardado neste navegador. É só isso que vem
+		de fora: o programa de OCR vem deste site, e o seu documento é lido aqui, no seu dispositivo, e
+		nunca é enviado.
 	</p>
 
 	<button

@@ -5,7 +5,8 @@
 	 *
 	 * Only changed lines are submitted — touching a line at all costs it its
 	 * original font, so leaving one alone is strictly better than rewriting
-	 * it identically.
+	 * it identically. Edits are kept per page, so moving to another page and
+	 * back loses nothing, and one save applies every page's edits.
 	 */
 	import { run as runJob } from '$lib/engine/client';
 	import { baseName } from '$lib/download';
@@ -18,34 +19,51 @@
 
 	let page = $state(0);
 	// $state.raw, not $state: a deep proxy cannot be structured-cloned, so
-	// posting these rects back to the worker would throw DataCloneError. The
-	// list is replaced wholesale rather than mutated, so raw is also cheaper.
-	let lines = $state.raw<TextLine[]>([]);
-	let edited = $state<Record<number, string>>({});
-	let loading = $state(false);
+	// posting these rects back to the worker would throw DataCloneError. Each
+	// page's list is replaced wholesale rather than mutated.
+	let linesByPage = $state.raw<Record<number, TextLine[]>>({});
+	/** page -> line index -> replacement text */
+	let edited = $state<Record<number, Record<number, string>>>({});
+	let loadError = $state('');
 
-	// Reload whenever the document or the chosen page changes.
+	const lines = $derived(linesByPage[page]);
+	const pageEdits = $derived(edited[page] ?? {});
+
+	// Load each page once, the first time it is shown. A slow response for a
+	// page the user already left is still cached, but only a response for
+	// the current request may clear the error state.
+	let request = 0;
 	$effect(() => {
 		const handle = doc?.handle;
 		const index = page;
-		if (!handle) return;
-
-		loading = true;
-		edited = {};
+		if (!handle || linesByPage[index]) return;
+		const id = ++request;
+		loadError = '';
 		runJob('textLines', { handle, page: index })
-			.then((result) => {
-				lines = result;
-			})
-			.finally(() => {
-				loading = false;
+			.then((result) => (linesByPage = { ...linesByPage, [index]: result }))
+			.catch((err: Error) => {
+				if (id === request) loadError = `Não foi possível ler o texto desta página: ${err.message}`;
 			});
 	});
 
 	const changes = $derived(
-		Object.entries(edited)
-			.map(([key, text]) => ({ line: lines[Number(key)], text }))
-			.filter(({ line, text }) => line && text !== line.text)
+		Object.entries(edited).flatMap(([p, byLine]) =>
+			Object.entries(byLine)
+				.map(([key, text]) => ({ line: linesByPage[Number(p)]?.[Number(key)], text }))
+				.filter(({ line, text }) => line && text !== line.text)
+				.map(({ line, text }) => ({ line: line!, text }))
+		)
 	);
+
+	const setLine = (index: number, text: string) => {
+		edited = { ...edited, [page]: { ...pageEdits, [index]: text } };
+	};
+
+	const undoLine = (index: number) => {
+		const next = { ...pageEdits };
+		delete next[index];
+		edited = { ...edited, [page]: next };
+	};
 
 	const apply = () =>
 		run(async () => {
@@ -58,7 +76,7 @@
 					text,
 					size: line.size
 				})),
-				filename: `${baseName(doc.title || 'document')}-edited.pdf`
+				filename: `${baseName(doc.filename)}-edited.pdf`
 			});
 			return {
 				files: [file],
@@ -94,35 +112,35 @@
 	</button>
 </div>
 
-{#if loading}
+{#if loadError}
+	<p class="rounded-[var(--radius-control)] bg-danger-soft p-4 text-sm text-danger" role="alert">
+		{loadError}
+	</p>
+{:else if !lines}
 	<p class="text-sm text-muted">Lendo o texto…</p>
 {:else if lines.length === 0}
 	<p class="rounded-[var(--radius-control)] bg-raised p-4 text-sm text-ink">
-		No text was found on this page. If the document is a scan, run OCR first to give it a text
-		layer.
+		Nenhum texto foi encontrado nesta página. Se o documento for digitalizado, rode o OCR antes para
+		criar uma camada de texto.
 	</p>
 {:else}
 	<ul class="space-y-2">
 		{#each lines as line, index (index)}
-			{@const changed = edited[index] !== undefined && edited[index] !== line.text}
+			{@const changed = pageEdits[index] !== undefined && pageEdits[index] !== line.text}
 			<li class="flex items-center gap-3">
 				<span class="w-10 shrink-0 text-right text-xs text-muted">{index + 1}</span>
 				<input
 					class="flex-1 rounded-[var(--radius-control)] border px-3 py-2 text-sm
 						{changed ? 'border-accent bg-accent-soft' : 'border-line'}"
-					value={edited[index] ?? line.text}
+					value={pageEdits[index] ?? line.text}
 					aria-label="Linha {index + 1}"
-					oninput={(e) => (edited = { ...edited, [index]: e.currentTarget.value })}
+					oninput={(e) => setLine(index, e.currentTarget.value)}
 				/>
 				{#if changed}
 					<button
 						type="button"
 						class="text-xs text-muted underline hover:text-ink"
-						onclick={() => {
-							const next = { ...edited };
-							delete next[index];
-							edited = next;
-						}}
+						onclick={() => undoLine(index)}
 					>
 						Desfazer
 					</button>
