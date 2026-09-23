@@ -52,7 +52,7 @@
 		"mupdf": "^1.28.1",
 		"tesseract.js": "^7.0.0",
 		"turndown": "^7.2.4",
-		"xlsx": "^0.18.5"
+		"xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
 	},
 	"license": "AGPL-3.0-or-later",
 	"description": "Free, private PDF tools that run entirely in your browser"
